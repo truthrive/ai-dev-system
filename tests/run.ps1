@@ -111,6 +111,18 @@ try {
     Assert-True ($missingGate.ExitCode -eq 2) 'Missing gate target should be blocked.'
     $passed.Add('gate blocked handling')
 
+    $invalidGitProject = Join-Path $testRoot 'gate-invalid-git'
+    Write-FixtureFile -Path (Join-Path $invalidGitProject 'README.md') -Content "# Invalid Git metadata`n"
+    $null = New-Item -ItemType Directory -Path (Join-Path $invalidGitProject '.git')
+    $invalidGitBefore = Get-FileHashValue -Path (Join-Path $invalidGitProject 'README.md')
+    $invalidGitGate = Invoke-Tool -ScriptPath $gateRunner -Arguments @('-ProjectRoot', $invalidGitProject, '-OutputFormat', 'Json')
+    Assert-True ($invalidGitGate.ExitCode -eq 2) 'Invalid Git metadata should block the gate runner.'
+    $invalidGitReport = $invalidGitGate.Output | ConvertFrom-Json
+    Assert-True ($invalidGitReport.result -eq 'BLOCKED') 'Invalid Git metadata should report an overall BLOCKED result.'
+    Assert-True (($invalidGitReport.gates | Where-Object id -eq 'git.diff-check').status -eq 'BLOCKED') 'git.diff-check must be BLOCKED when Git metadata cannot be detected as a repository.'
+    Assert-True ((Get-FileHashValue -Path (Join-Path $invalidGitProject 'README.md')) -eq $invalidGitBefore) 'Invalid-metadata handling modified a checked file.'
+    $passed.Add('invalid Git metadata regression')
+
     $newProject = Join-Path $testRoot 'new-project'
     Write-FixtureFile -Path (Join-Path $newProject 'README.md') -Content "# New project`n"
     $newPreview = Invoke-Tool -ScriptPath $onboardingRunner -Arguments @('-ProjectRoot', $newProject, '-ProjectType', 'New', '-OutputFormat', 'Json')

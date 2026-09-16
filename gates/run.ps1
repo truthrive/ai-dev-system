@@ -83,6 +83,7 @@ if (-not (Test-Path -LiteralPath $resolvedRoot -PathType Container)) {
 $git = Get-Command git -ErrorAction SilentlyContinue
 $isGitWorkTree = $false
 $gitRoot = $null
+$hasGitMetadata = Test-Path -LiteralPath (Join-Path $resolvedRoot '.git')
 
 if ($null -ne $git) {
     $gitRootOutput = @(& $git.Source -C $resolvedRoot rev-parse --show-toplevel 2>$null)
@@ -104,8 +105,13 @@ if ($isGitWorkTree) {
     } else {
         $results.Add((New-GateResult -Id 'git.diff-check' -Status 'FAIL' -Summary 'Git reported whitespace errors.' -Details $details))
     }
-} elseif ($null -eq $git -and (Test-Path -LiteralPath (Join-Path $resolvedRoot '.git'))) {
-    $results.Add((New-GateResult -Id 'git.diff-check' -Status 'BLOCKED' -Summary 'Git metadata exists but Git is unavailable.'))
+} elseif ($hasGitMetadata) {
+    $summary = if ($null -eq $git) {
+        'Git metadata exists but Git is unavailable.'
+    } else {
+        'Git metadata exists but repository detection failed.'
+    }
+    $results.Add((New-GateResult -Id 'git.diff-check' -Status 'BLOCKED' -Summary $summary))
 } else {
     $results.Add((New-GateResult -Id 'git.diff-check' -Status 'SKIP' -Summary 'Target is not a Git work tree.'))
 }

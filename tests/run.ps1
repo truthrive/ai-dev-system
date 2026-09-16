@@ -4,11 +4,13 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\', '/')
 $gateRunner = Join-Path $repositoryRoot 'gates/run.ps1'
 $onboardingRunner = Join-Path $repositoryRoot 'onboarding/onboard.ps1'
+$installerRunner = Join-Path $repositoryRoot 'installer/install.ps1'
+$updaterRunner = Join-Path $repositoryRoot 'installer/update.ps1'
 $powerShell = (Get-Process -Id $PID).Path
-$temporaryBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+$temporaryBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\', '/')
 $testRoot = [System.IO.Path]::GetFullPath((Join-Path $temporaryBase "ai-dev-system-m2-$([Guid]::NewGuid().ToString('N'))"))
 
 if (-not $testRoot.StartsWith($temporaryBase, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -43,9 +45,16 @@ function Invoke-Tool {
         [string[]]$Arguments
     )
 
-    $output = @(& $powerShell -NoProfile -File $ScriptPath @Arguments 2>&1 | ForEach-Object { [string]$_ })
+    $previousEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = @(& $powerShell -NoProfile -File $ScriptPath @Arguments 2>&1 | ForEach-Object { [string]$_ })
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousEAP
+    }
     [pscustomobject]@{
-        ExitCode = $LASTEXITCODE
+        ExitCode = $code
         Output   = ($output -join "`n")
     }
 }
@@ -56,13 +65,14 @@ function Initialize-FixtureRepository {
         [string[]]$Files
     )
 
-    & git -C $Path init --quiet
+    $trimmedPath = $Path.TrimEnd('\', '/')
+    & git -C $trimmedPath init --quiet
     if ($LASTEXITCODE -ne 0) { throw 'git init failed for fixture.' }
-    & git -C $Path config user.email 'fixture@example.invalid'
-    & git -C $Path config user.name 'M2 Fixture'
-    & git -C $Path add -- @Files
+    & git -C $trimmedPath config user.email 'fixture@example.invalid'
+    & git -C $trimmedPath config user.name 'M2 Fixture'
+    & git -C $trimmedPath add -- @Files
     if ($LASTEXITCODE -ne 0) { throw 'git add failed for fixture.' }
-    & git -C $Path commit --quiet -m 'fixture baseline'
+    & git -C $trimmedPath commit --quiet -m 'fixture baseline'
     if ($LASTEXITCODE -ne 0) { throw 'git commit failed for fixture.' }
 }
 
@@ -305,6 +315,86 @@ try {
     $invalidPackageDeclaration = ($invalidPackagePreview.Output | ConvertFrom-Json).discovery.declarations.packageScripts[0]
     Assert-True ($invalidPackageDeclaration.PSObject.Properties['parseError'].Value.Length -gt 0) 'Invalid package JSON must retain a parse error.'
     $passed.Add('package declaration StrictMode and invalid JSON handling')
+
+    # M4 Installer & Updater fixtures
+    $installerPreviewProject = Join-Path $testRoot 'installer-preview'
+    Write-FixtureFile -Path (Join-Path $installerPreviewProject 'README.md') -Content "# Target Project`n"
+    $installPreview = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $installerPreviewProject, '-OutputFormat', 'Json')
+    Assert-True ($installPreview.ExitCode -eq 0) 'Installer preview should succeed.'
+    $installPreviewReport = $installPreview.Output | ConvertFrom-Json
+    Assert-True ($installPreviewReport.proposal.action -eq 'INSTALL') 'Installer preview should propose INSTALL.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $installerPreviewProject '.ai-dev-system'))) 'Installer preview created files.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $installerPreviewProject 'AGENTS.md'))) 'Installer preview created AGENTS.md.'
+    $passed.Add('installer preview behavior')
+
+    $installerApplyProject = Join-Path $testRoot 'installer-apply'
+    Write-FixtureFile -Path (Join-Path $installerApplyProject 'README.md') -Content "# Fresh Project`n"
+    $installApply = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $installerApplyProject, '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($installApply.ExitCode -eq 0) 'Installer apply should succeed.'
+    $installApplyReport = $installApply.Output | ConvertFrom-Json
+    Assert-True ($installApplyReport.proposal.action -eq 'INSTALLED') 'Installer apply should report INSTALLED.'
+    $targetSysDir = Join-Path $installerApplyProject '.ai-dev-system'
+    Assert-True (Test-Path -LiteralPath (Join-Path $targetSysDir 'VERSION') -PathType Leaf) 'VERSION file was not installed.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $targetSysDir 'manifest.json') -PathType Leaf) 'manifest.json was not installed.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $targetSysDir 'core/constitution/default.md') -PathType Leaf) 'Core constitution was not installed.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $installerApplyProject 'AGENTS.md') -PathType Leaf) 'AGENTS.md was not created.'
+    $agentsText = [System.IO.File]::ReadAllText((Join-Path $installerApplyProject 'AGENTS.md'))
+    Assert-True ($agentsText.Contains('<!-- AI-DEV-SYSTEM:START -->') -and $agentsText.Contains('<!-- AI-DEV-SYSTEM:END -->')) 'Delimited block missing from AGENTS.md.'
+    $manifestData = Get-Content -LiteralPath (Join-Path $targetSysDir 'manifest.json') -Raw | ConvertFrom-Json
+    Assert-True ($manifestData.version.Length -gt 0) 'Manifest version missing.'
+    Assert-True ((@($manifestData.files.PSObject.Properties)).Count -gt 15) 'Manifest files count too low.'
+    $passed.Add('installer apply and structure generation')
+
+    $installerExistingProject = Join-Path $testRoot 'installer-existing'
+    $customInstructions = "# Custom Project Header`nDo not modify these existing rules.`n"
+    Write-FixtureFile -Path (Join-Path $installerExistingProject 'AGENTS.md') -Content $customInstructions
+    Write-FixtureFile -Path (Join-Path $installerExistingProject 'README.md') -Content "# Existing Project`n"
+    $existingInstall = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $installerExistingProject, '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($existingInstall.ExitCode -eq 0) 'Installer apply on existing AGENTS.md should succeed.'
+    $existingAgentsText = [System.IO.File]::ReadAllText((Join-Path $installerExistingProject 'AGENTS.md'))
+    Assert-True ($existingAgentsText.StartsWith($customInstructions)) 'Existing custom instructions were overwritten or lost.'
+    Assert-True ($existingAgentsText.Contains('<!-- AI-DEV-SYSTEM:START -->')) 'Delimited block not appended to existing AGENTS.md.'
+    $passed.Add('installer non-destructive AGENTS.md preservation')
+
+    $updaterProject = Join-Path $testRoot 'updater-project'
+    Write-FixtureFile -Path (Join-Path $updaterProject 'README.md') -Content "# Project to Update`n"
+    $null = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $updaterProject, '-Apply')
+    $customContext = "# Custom Project Context`nManaged by team.`n"
+    Write-FixtureFile -Path (Join-Path $updaterProject '.ai-dev-system/PROJECT_CONTEXT.md') -Content $customContext
+    $contextHashBefore = Get-FileHashValue -Path (Join-Path $updaterProject '.ai-dev-system/PROJECT_CONTEXT.md')
+    $updateRun = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $updaterProject, '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($updateRun.ExitCode -eq 0) 'Updater should succeed.'
+    $contextHashAfter = Get-FileHashValue -Path (Join-Path $updaterProject '.ai-dev-system/PROJECT_CONTEXT.md')
+    Assert-True ($contextHashBefore -eq $contextHashAfter) 'PROJECT_CONTEXT.md was modified by update.'
+    $updateReport = $updateRun.Output | ConvertFrom-Json
+    Assert-True ($updateReport.changes.preserved -contains 'PROJECT_CONTEXT.md') 'PROJECT_CONTEXT.md was not reported as preserved.'
+    $passed.Add('updater project-context preservation')
+
+    $dirtyTargetProject = Join-Path $testRoot 'installer-dirty'
+    Write-FixtureFile -Path (Join-Path $dirtyTargetProject 'README.md') -Content "# Initial`n"
+    Initialize-FixtureRepository -Path $dirtyTargetProject -Files @('README.md')
+    Write-FixtureFile -Path (Join-Path $dirtyTargetProject 'README.md') -Content "# Uncommitted change`n"
+    $dirtyInstall = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $dirtyTargetProject, '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($dirtyInstall.ExitCode -eq 2) 'Installer should block on dirty Git repository.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $dirtyTargetProject '.ai-dev-system'))) 'Dirty project install created state.'
+    $passed.Add('installer dirty-tree safety blocking')
+
+    $modifiedSystemProject = Join-Path $testRoot 'installer-modified'
+    Write-FixtureFile -Path (Join-Path $modifiedSystemProject 'README.md') -Content "# Target`n"
+    $null = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $modifiedSystemProject, '-Apply')
+    $tamperedFile = Join-Path $modifiedSystemProject '.ai-dev-system/core/constitution/default.md'
+    Write-FixtureFile -Path $tamperedFile -Content '# Tampered constitution'
+    $tamperedUpdate = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $modifiedSystemProject, '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($tamperedUpdate.ExitCode -eq 2) 'Updater without force should block on modified system file.'
+    $tamperedReport = $tamperedUpdate.Output | ConvertFrom-Json
+    Assert-True ($tamperedReport.result -eq 'BLOCKED') 'Tampered system file should report BLOCKED.'
+    $forcedUpdate = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $modifiedSystemProject, '-Apply', '-Force', '-OutputFormat', 'Json')
+    Assert-True ($forcedUpdate.ExitCode -eq 0) 'Updater with -Force should succeed.'
+    $passed.Add('updater modified-system-file detection and force override')
+
+    $selfInstall = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $repositoryRoot, '-OutputFormat', 'Json')
+    Assert-True ($selfInstall.ExitCode -ne 0) 'Installer should refuse self-installation into source repository.'
+    $passed.Add('installer self-installation rejection')
 
     foreach ($name in $passed) {
         "[PASS] $name"

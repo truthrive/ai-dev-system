@@ -31,3 +31,25 @@ function Test-DiscoveryFile {
     }
     return Test-Path -LiteralPath $current -PathType Leaf
 }
+
+function Get-RelativePathCompat {
+    param(
+        [string]$RelativeTo,
+        [string]$Path
+    )
+
+    $method = [type]::GetType('System.IO.Path').GetMethod('GetRelativePath', [type[]]@([string], [string]))
+    if ($null -ne $method) {
+        return [System.IO.Path]::GetRelativePath($RelativeTo, $Path)
+    }
+
+    $fromPath = [System.IO.Path]::GetFullPath($RelativeTo).TrimEnd('\', '/')
+    $toPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+    if ($fromPath -eq $toPath) { return '.' }
+
+    $fromUri = [System.Uri]::new($fromPath + '/')
+    $toUri = [System.Uri]::new($toPath)
+    $relativeUri = $fromUri.MakeRelativeUri($toUri)
+    $relativeString = [System.Uri]::UnescapeDataString($relativeUri.ToString())
+    return $relativeString.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+}

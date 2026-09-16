@@ -22,7 +22,7 @@ function ConvertTo-RelativePathList {
     )
 
     @($Files | ForEach-Object {
-        [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/')
+        (Get-RelativePathCompat $Root $_.FullName).Replace('\', '/')
     } | Sort-Object -Unique)
 }
 
@@ -56,7 +56,7 @@ function Write-OnboardingReport {
 }
 
 try {
-    $resolvedRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
+    $resolvedRoot = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\', '/')
     if (-not (Test-Path -LiteralPath $resolvedRoot -PathType Container)) {
         throw "Project root does not exist: $resolvedRoot"
     }
@@ -76,12 +76,25 @@ try {
     $childGitDirectories = @()
 
     if ($null -ne $gitCommand) {
-        $gitRootOutput = @(& $gitCommand.Source -C $resolvedRoot rev-parse --show-toplevel 2>&1)
-        if ($LASTEXITCODE -eq 0 -and $gitRootOutput.Count -gt 0) {
+        $previousEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $gitRootOutput = @(& $gitCommand.Source -C $resolvedRoot rev-parse --show-toplevel 2>&1 | ForEach-Object { [string]$_ })
+            $rootExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousEAP
+        }
+        if ($rootExit -eq 0 -and $gitRootOutput.Count -gt 0) {
             $isGitRepository = $true
-            $gitRoot = [System.IO.Path]::GetFullPath([string]$gitRootOutput[0])
-            $gitPrefixOutput = @(& $gitCommand.Source -C $resolvedRoot rev-parse --show-prefix 2>&1)
-            if ($LASTEXITCODE -ne 0) {
+            $gitRoot = [System.IO.Path]::GetFullPath([string]$gitRootOutput[0]).TrimEnd('\', '/')
+            $ErrorActionPreference = 'Continue'
+            try {
+                $gitPrefixOutput = @(& $gitCommand.Source -C $resolvedRoot rev-parse --show-prefix 2>&1 | ForEach-Object { [string]$_ })
+                $prefixExit = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $previousEAP
+            }
+            if ($prefixExit -ne 0) {
                 $gitAccessFailed = $true
                 throw "Git root comparison failed: $($gitPrefixOutput -join "`n")"
             }
@@ -89,8 +102,14 @@ try {
             if ($isProjectGitRoot) {
                 $resolvedRoot = $gitRoot
             }
-            $gitChanges = @(& $gitCommand.Source -C $gitRoot status --porcelain=v1 --untracked-files=all -- 2>&1 | ForEach-Object { [string]$_ })
-            if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = 'Continue'
+            try {
+                $gitChanges = @(& $gitCommand.Source -C $gitRoot status --porcelain=v1 --untracked-files=all -- 2>&1 | ForEach-Object { [string]$_ })
+                $statusExit = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $previousEAP
+            }
+            if ($statusExit -ne 0) {
                 $gitAccessFailed = $true
                 throw "Git status failed: $($gitChanges -join "`n")"
             }
@@ -111,24 +130,38 @@ try {
             if (-not (Test-Path -LiteralPath (Join-Path $child.FullName '.git'))) { continue }
             $childGitDirectories += [System.IO.Path]::GetFullPath($child.FullName)
 
-            $childRootOutput = @(& $gitCommand.Source -C $child.FullName rev-parse --show-toplevel 2>&1)
-            if ($LASTEXITCODE -eq 0 -and $childRootOutput.Count -gt 0) {
-                $childRoot = [System.IO.Path]::GetFullPath([string]$childRootOutput[0])
-                $childPrefixOutput = @(& $gitCommand.Source -C $child.FullName rev-parse --show-prefix 2>&1)
-                if ($LASTEXITCODE -eq 0 -and [string]::IsNullOrEmpty(($childPrefixOutput -join ''))) {
+            $childPath = [System.IO.Path]::GetFullPath($child.FullName).TrimEnd('\', '/')
+            $previousEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $childRootOutput = @(& $gitCommand.Source -C $childPath rev-parse --show-toplevel 2>&1 | ForEach-Object { [string]$_ })
+                $childRootExit = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $previousEAP
+            }
+            if ($childRootExit -eq 0 -and $childRootOutput.Count -gt 0) {
+                $childRoot = [System.IO.Path]::GetFullPath([string]$childRootOutput[0]).TrimEnd('\', '/')
+                $ErrorActionPreference = 'Continue'
+                try {
+                    $childPrefixOutput = @(& $gitCommand.Source -C $childPath rev-parse --show-prefix 2>&1 | ForEach-Object { [string]$_ })
+                    $childPrefixExit = $LASTEXITCODE
+                } finally {
+                    $ErrorActionPreference = $previousEAP
+                }
+                if ($childPrefixExit -eq 0 -and [string]::IsNullOrEmpty(($childPrefixOutput -join ''))) {
                     $childGitRepositories += [pscustomobject][ordered]@{
-                        path = [System.IO.Path]::GetRelativePath($resolvedRoot, $child.FullName).Replace('\', '/')
+                        path = (Get-RelativePathCompat $resolvedRoot $child.FullName).Replace('\', '/')
                         root = $childRoot
                     }
-                } elseif ($LASTEXITCODE -ne 0) {
+                } elseif ($childPrefixExit -ne 0) {
                     $childGitDiscoveryIssues += [pscustomobject][ordered]@{
-                        path  = [System.IO.Path]::GetRelativePath($resolvedRoot, $child.FullName).Replace('\', '/')
+                        path  = (Get-RelativePathCompat $resolvedRoot $child.FullName).Replace('\', '/')
                         error = $childPrefixOutput -join "`n"
                     }
                 }
             } else {
                 $childGitDiscoveryIssues += [pscustomobject][ordered]@{
-                    path  = [System.IO.Path]::GetRelativePath($resolvedRoot, $child.FullName).Replace('\', '/')
+                    path  = (Get-RelativePathCompat $resolvedRoot $child.FullName).Replace('\', '/')
                     error = $childRootOutput -join "`n"
                 }
             }
@@ -136,8 +169,15 @@ try {
     }
 
     if ($isGitRepository) {
-        $relativeFiles = @(& $gitCommand.Source -c core.quotePath=false -C $gitRoot ls-files --cached --others --exclude-standard 2>&1)
-        if ($LASTEXITCODE -ne 0) {
+        $previousEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $relativeFiles = @(& $gitCommand.Source -c core.quotePath=false -C $gitRoot ls-files --cached --others --exclude-standard 2>&1 | ForEach-Object { [string]$_ })
+            $lsExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousEAP
+        }
+        if ($lsExit -ne 0) {
             $gitAccessFailed = $true
             throw "Git file discovery failed: $($relativeFiles -join ' ')"
         }
@@ -154,7 +194,7 @@ try {
     }
 
     # Probe only named ignored instruction files, never arbitrary ignored trees.
-    $knownInstructions = @('AGENTS.md', 'CLAUDE.md', '.cursorrules', '.github/copilot-instructions.md')
+    $knownInstructions = @('AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.cursorrules', '.github/copilot-instructions.md')
     foreach ($skillsPath in @('.agent/skills', '.agents/skills', '.codex/skills')) {
         $skillsDirectory = Join-Path $resolvedRoot $skillsPath
         $safeParents = $true
@@ -168,8 +208,26 @@ try {
             }
         }
         if ($safeParents) {
-            foreach ($folder in Get-ChildItem -LiteralPath $skillsDirectory -Directory -Force) {
+            foreach ($folder in Get-ChildItem -LiteralPath $skillsDirectory -Directory -Force -ErrorAction SilentlyContinue) {
                 $knownInstructions += "$skillsPath/$($folder.Name)/SKILL.md"
+            }
+        }
+    }
+    foreach ($rulesPath in @('.agents/rules', '.agent/rules', '.cursor/rules')) {
+        $rulesDirectory = Join-Path $resolvedRoot $rulesPath
+        $safeParents = $true
+        $parentPath = $resolvedRoot
+        foreach ($part in ($rulesPath -split '/')) {
+            $parentPath = Join-Path $parentPath $part
+            if (-not (Test-Path -LiteralPath $parentPath -PathType Container) -or
+                ((Get-Item -LiteralPath $parentPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                $safeParents = $false
+                break
+            }
+        }
+        if ($safeParents) {
+            foreach ($ruleFile in Get-ChildItem -LiteralPath $rulesDirectory -Filter '*.md' -Force -ErrorAction SilentlyContinue) {
+                $knownInstructions += "$rulesPath/$($ruleFile.Name)"
             }
         }
     }
@@ -181,17 +239,17 @@ try {
     $projectFiles = @($projectFiles | Sort-Object FullName -Unique)
     $relative = @{}
     foreach ($file in $projectFiles) {
-        $relative[$file.FullName] = [System.IO.Path]::GetRelativePath($resolvedRoot, $file.FullName).Replace('\', '/')
+        $relative[$file.FullName] = (Get-RelativePathCompat $resolvedRoot $file.FullName).Replace('\', '/')
     }
 
     $instructionFiles = @($projectFiles | Where-Object {
         $path = $relative[$_.FullName]
-        $_.Name -match '^(AGENTS|CLAUDE)\.md$' -or
+        $_.Name -match '^(AGENTS|CLAUDE|GEMINI)\.md$' -or
         $_.Name -match '^CONTRIBUTING(?:\..+)?$' -or
         $_.Name -eq '.cursorrules' -or
         $_.Name -eq 'copilot-instructions.md' -or
         $path -match '^\.(agent|agents|codex)/skills/[^/]+/SKILL\.md$' -or
-        $path -match '^\.cursor/rules/'
+        $path -match '^\.(cursor|agents|agent)/rules/'
     })
 
     $contextFiles = @($projectFiles | Where-Object {

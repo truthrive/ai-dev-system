@@ -4,7 +4,7 @@ A reusable, context-first, specification-driven AI development system for coding
 
 AI Dev System exists to make development deliberate, changes small, and completion verifiable across technology stacks and coding agents. It provides a shared foundation for reusable rules, skills, and workflows, guided by evidence from real project work.
 
-**Status: early development (`0.1.0-dev`).** Milestones 1 and 2 provide the technology-agnostic operating model, minimal deterministic gates, evidence requirements, and safe project onboarding. Full installation, update, distribution, and stack-specific integrations remain future work; see the [roadmap](docs/ROADMAP.md).
+**Status: stable release (`1.0.0`).** Milestones 1 through 4 implement the technology-agnostic operating model, deterministic gates, verification-evidence contracts, preview-first project onboarding, and distribution via preview-first installation and safe versioned updates; see the [roadmap](docs/ROADMAP.md).
 
 ## Intended lifecycle
 
@@ -33,6 +33,22 @@ Milestone 2 adds:
 - isolated fixture checks for non-destructive behavior and failure handling.
 
 Onboarding creates no project instruction file and refuses to overwrite recognized context or operate on dirty active and legacy projects.
+
+## Distribution and installation
+
+Milestone 4 implements:
+
+- a preview-first [installer](installer/install.ps1) for adopting AI Dev System in new and active projects with delimited `AGENTS.md` integration and SHA-256 manifest tracking;
+- a safe [updater](installer/update.ps1) that validates local modifications, preserves project-owned context, and cleanly updates system-managed files;
+- cross-platform PowerShell 5.1 and PowerShell Core 7 (`pwsh`) compatibility for deterministic execution on Windows and other supported platforms.
+
+Preview installation into a target project:
+
+```powershell
+pwsh -NoProfile -File installer/install.ps1 -ProjectRoot <path>
+```
+
+Pass `-Apply` to install into `.ai-dev-system/` and link the project entrypoint. Use `installer/update.ps1 -ProjectRoot <path> -Apply` to update an existing project.
 
 ## Separation of concerns
 

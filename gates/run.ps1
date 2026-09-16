@@ -68,7 +68,7 @@ function Get-GateExitCode {
 $results = [System.Collections.Generic.List[object]]::new()
 
 try {
-    $resolvedRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
+    $resolvedRoot = [System.IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\', '/')
 } catch {
     $results.Add((New-GateResult -Id 'input.project-root' -Status 'BLOCKED' -Summary 'Project root is invalid.' -Details @($_.Exception.Message)))
     Write-GateReport -Results $results.ToArray() -Format $OutputFormat
@@ -88,10 +88,16 @@ $hasGitMetadata = Test-Path -LiteralPath (Join-Path $resolvedRoot '.git')
 $gitRootOutput = @('Git is unavailable.')
 
 if ($null -ne $git) {
-    $gitRootOutput = @(& $git.Source -C $resolvedRoot rev-parse --show-toplevel 2>&1)
+    $previousEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $gitRootOutput = @(& $git.Source -C $resolvedRoot rev-parse --show-toplevel 2>&1 | ForEach-Object { [string]$_ })
+    } finally {
+        $ErrorActionPreference = $previousEAP
+    }
     if ($LASTEXITCODE -eq 0 -and $gitRootOutput.Count -gt 0) {
         $isGitWorkTree = $true
-        $gitRoot = [System.IO.Path]::GetFullPath([string]$gitRootOutput[0])
+        $gitRoot = [System.IO.Path]::GetFullPath([string]$gitRootOutput[0]).TrimEnd('\', '/')
     }
 }
 
@@ -99,11 +105,17 @@ $gitAccessBlocked = -not $isGitWorkTree -and ($hasGitMetadata -or
     ($null -ne $git -and ($gitRootOutput -join ' ') -notmatch 'not a git repository'))
 
 if ($isGitWorkTree) {
-    $unstagedOutput = @(& $git.Source -C $gitRoot diff --check -- 2>&1)
-    $unstagedExit = $LASTEXITCODE
-    $stagedOutput = @(& $git.Source -C $gitRoot diff --cached --check -- 2>&1)
-    $stagedExit = $LASTEXITCODE
-    $details = @($unstagedOutput + $stagedOutput | ForEach-Object { [string]$_ } | Where-Object { $_.Length -gt 0 })
+    $previousEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $unstagedOutput = @(& $git.Source -C $gitRoot diff --check -- 2>&1 | ForEach-Object { [string]$_ })
+        $unstagedExit = $LASTEXITCODE
+        $stagedOutput = @(& $git.Source -C $gitRoot diff --cached --check -- 2>&1 | ForEach-Object { [string]$_ })
+        $stagedExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousEAP
+    }
+    $details = @($unstagedOutput + $stagedOutput | Where-Object { $_.Length -gt 0 })
 
     if ($unstagedExit -eq 0 -and $stagedExit -eq 0) {
         $results.Add((New-GateResult -Id 'git.diff-check' -Status 'PASS' -Summary 'Tracked staged and unstaged changes contain no whitespace errors.'))
@@ -127,8 +139,15 @@ $discoveryBlocked = $null
 try {
     if ($gitAccessBlocked) { throw ($gitRootOutput -join "`n") }
     if ($isGitWorkTree) {
-        $relativeMarkdown = @(& $git.Source -c core.quotePath=false -C $gitRoot ls-files --cached --others --exclude-standard -- '*.md' 2>&1)
-        if ($LASTEXITCODE -ne 0) {
+        $previousEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $relativeMarkdown = @(& $git.Source -c core.quotePath=false -C $gitRoot ls-files --cached --others --exclude-standard -- '*.md' 2>&1 | ForEach-Object { [string]$_ })
+            $lsExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousEAP
+        }
+        if ($lsExit -ne 0) {
             throw "Git could not enumerate Markdown files: $($relativeMarkdown -join ' ')"
         }
         $markdownFiles = @($relativeMarkdown | Where-Object { Test-DiscoveryFile $gitRoot ([string]$_) } | ForEach-Object { Join-Path $gitRoot ([string]$_) })
@@ -173,7 +192,7 @@ if ($null -ne $discoveryBlocked) {
                 $decodedPath = [System.Uri]::UnescapeDataString($pathOnly)
                 $candidate = [System.IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $markdownFile) $decodedPath))
                 if (-not (Test-Path -LiteralPath $candidate)) {
-                    $displayFile = [System.IO.Path]::GetRelativePath($resolvedRoot, $markdownFile)
+                    $displayFile = (Get-RelativePathCompat $resolvedRoot $markdownFile).Replace('\', '/')
                     $brokenLinks.Add("$displayFile -> $rawTarget")
                 }
             }

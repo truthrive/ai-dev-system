@@ -15,8 +15,8 @@ This is the central router for AI Dev System. Start with the constitution, selec
 | Workflows | See below | Available: feature, bugfix, and refactor |
 | Gates | [Gate contract](../gates/CONTRACT.md) and [runner](../gates/run.ps1) | Available: Git diff and local Markdown-link checks |
 | Templates | [Project context](../templates/project-context.md) and [verification evidence](../templates/verification-evidence.md) | Available |
-| Installer | [installer/](../installer/) | Not implemented |
-| Tests | [M2 verification harness](../tests/run.ps1) | Available: isolated gate and onboarding fixtures |
+| Installer | [Installer](../installer/install.ps1) and [updater](../installer/update.ps1) | Available: preview-first installer and safe versioned updater |
+| Tests | [Verification harness](../tests/run.ps1) | Available: isolated gate, onboarding, installer, and update fixtures |
 
 ## Rules
 
@@ -49,4 +49,9 @@ This is the central router for AI Dev System. Start with the constitution, selec
 - Follow the [verification and evidence contract](verification-evidence.md) when reporting results.
 - Use [project onboarding](onboarding.md) to inspect a target and create a missing project-context file without replacing existing work.
 
-See the [README](../README.md) for scope and intended lifecycle, [VERSION](../VERSION) for the development version, and [CHANGELOG](../CHANGELOG.md) for recorded changes. Add routes as real documentation or implementations become available.
+## Distribution and installation
+
+- Use the [installer](../installer/install.ps1) to preview and install AI Dev System into new and existing projects.
+- Use the [updater](../installer/update.ps1) to safely apply versioned updates while preserving project context and custom instructions.
+
+See the [README](../README.md) for scope and intended lifecycle, [VERSION](../VERSION) for the release version, and [CHANGELOG](../CHANGELOG.md) for recorded changes. Add routes as real documentation or implementations become available.

@@ -392,6 +392,116 @@ try {
     Assert-True ($forcedUpdate.ExitCode -eq 0) 'Updater with -Force should succeed.'
     $passed.Add('updater modified-system-file detection and force override')
 
+    # Update with missing manifest
+    $missingManifestProject = Join-Path $testRoot 'updater-missing-manifest'
+    Write-FixtureFile -Path (Join-Path $missingManifestProject 'README.md') -Content "# Missing Manifest Project`n"
+    $null = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $missingManifestProject, '-Apply')
+    $manifestPath = Join-Path $missingManifestProject '.ai-dev-system/manifest.json'
+    Remove-Item -LiteralPath $manifestPath -Force
+    $customDocPath = Join-Path $missingManifestProject '.ai-dev-system/docs/INDEX.md'
+    $customDocHashBefore = Get-FileHashValue -Path $customDocPath
+
+    $missingPreview = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $missingManifestProject, '-OutputFormat', 'Json')
+    Assert-True ($missingPreview.ExitCode -eq 0) 'Missing manifest preview should succeed as a read-only query.'
+    $missingPreviewReport = $missingPreview.Output | ConvertFrom-Json
+    Assert-True ($missingPreviewReport.proposal.action -eq 'BLOCKED') 'Missing manifest preview should propose BLOCKED.'
+    Assert-True ((@($missingPreviewReport.reasons) -match 'manifest.json is missing').Count -gt 0) 'Missing manifest preview should report blocker reason.'
+    Assert-True (-not (Test-Path -LiteralPath $manifestPath)) 'Missing manifest preview must not create files.'
+    Assert-True ((Get-FileHashValue -Path $customDocPath) -eq $customDocHashBefore) 'Missing manifest preview modified files.'
+
+    $missingApply = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $missingManifestProject, '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($missingApply.ExitCode -eq 2) 'Missing manifest update without -Force should block apply.'
+    $missingApplyReport = $missingApply.Output | ConvertFrom-Json
+    Assert-True ($missingApplyReport.result -eq 'BLOCKED') 'Missing manifest apply should report BLOCKED.'
+    Assert-True (-not (Test-Path -LiteralPath $manifestPath)) 'Blocked update must not create manifest.'
+    Assert-True ((Get-FileHashValue -Path $customDocPath) -eq $customDocHashBefore) 'Blocked update modified target files.'
+
+    $forcedMissingApply = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $missingManifestProject, '-Apply', '-Force', '-OutputFormat', 'Json')
+    Assert-True ($forcedMissingApply.ExitCode -eq 0) 'Missing manifest update with -Force should succeed.'
+    Assert-True (Test-Path -LiteralPath $manifestPath -PathType Leaf) 'Forced update should recreate manifest.json.'
+    $passed.Add('updater missing-manifest safety blocking and force override')
+
+    # Update with malformed manifest
+    $malformedManifestProject = Join-Path $testRoot 'updater-malformed-manifest'
+    Write-FixtureFile -Path (Join-Path $malformedManifestProject 'README.md') -Content "# Malformed Manifest Project`n"
+    $null = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $malformedManifestProject, '-Apply')
+    $malformedPath = Join-Path $malformedManifestProject '.ai-dev-system/manifest.json'
+    Write-FixtureFile -Path $malformedPath -Content '{invalid json structure'
+
+    $malformedPreview = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $malformedManifestProject, '-OutputFormat', 'Json')
+    Assert-True ($malformedPreview.ExitCode -eq 0) 'Malformed manifest preview should succeed as a read-only query.'
+    $malformedPreviewReport = $malformedPreview.Output | ConvertFrom-Json
+    Assert-True ($malformedPreviewReport.proposal.action -eq 'BLOCKED') 'Malformed manifest preview should propose BLOCKED.'
+    Assert-True ((@($malformedPreviewReport.reasons) -match 'manifest.json is malformed').Count -gt 0) 'Malformed manifest preview should report blocker reason.'
+    Assert-True (([System.IO.File]::ReadAllText($malformedPath)) -eq '{invalid json structure') 'Malformed manifest preview modified manifest.'
+
+    $malformedApply = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $malformedManifestProject, '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($malformedApply.ExitCode -eq 2) 'Malformed manifest update without -Force should block apply.'
+    $malformedApplyReport = $malformedApply.Output | ConvertFrom-Json
+    Assert-True ($malformedApplyReport.result -eq 'BLOCKED') 'Malformed manifest apply should report BLOCKED.'
+    Assert-True (([System.IO.File]::ReadAllText($malformedPath)) -eq '{invalid json structure') 'Blocked malformed update modified manifest.'
+
+    $forcedMalformedApply = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $malformedManifestProject, '-Apply', '-Force', '-OutputFormat', 'Json')
+    Assert-True ($forcedMalformedApply.ExitCode -eq 0) 'Malformed manifest update with -Force should succeed.'
+    Assert-True (([System.IO.File]::ReadAllText($malformedPath)) -ne '{invalid json structure') 'Forced update should write valid manifest.'
+    $passed.Add('updater malformed-manifest safety blocking and force override')
+
+    # Update with incomplete manifest
+    $incompleteManifestProject = Join-Path $testRoot 'updater-incomplete-manifest'
+    Write-FixtureFile -Path (Join-Path $incompleteManifestProject 'README.md') -Content "# Incomplete Manifest Project`n"
+    $null = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $incompleteManifestProject, '-Apply')
+    $incompletePath = Join-Path $incompleteManifestProject '.ai-dev-system/manifest.json'
+    Write-FixtureFile -Path $incompletePath -Content '{"version":"1.0.0"}'
+
+    $incompletePreview = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $incompleteManifestProject, '-OutputFormat', 'Json')
+    Assert-True ($incompletePreview.ExitCode -eq 0) 'Incomplete manifest preview should succeed as a read-only query.'
+    $incompletePreviewReport = $incompletePreview.Output | ConvertFrom-Json
+    Assert-True ($incompletePreviewReport.proposal.action -eq 'BLOCKED') 'Incomplete manifest preview should propose BLOCKED.'
+    Assert-True ((@($incompletePreviewReport.reasons) -match 'manifest.json is incomplete').Count -gt 0) 'Incomplete manifest preview should report blocker reason.'
+
+    $incompleteApply = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $incompleteManifestProject, '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($incompleteApply.ExitCode -eq 2) 'Incomplete manifest update without -Force should block apply.'
+    $incompleteApplyReport = $incompleteApply.Output | ConvertFrom-Json
+    Assert-True ($incompleteApplyReport.result -eq 'BLOCKED') 'Incomplete manifest apply should report BLOCKED.'
+
+    $forcedIncompleteApply = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $incompleteManifestProject, '-Apply', '-Force', '-OutputFormat', 'Json')
+    Assert-True ($forcedIncompleteApply.ExitCode -eq 0) 'Incomplete manifest update with -Force should succeed.'
+    $repairedManifest = Get-Content -LiteralPath $incompletePath -Raw | ConvertFrom-Json
+    Assert-True ((@($repairedManifest.files.PSObject.Properties)).Count -gt 15) 'Forced update should populate complete files map.'
+    $passed.Add('updater incomplete-manifest safety blocking and force override')
+
+    # Fresh install collision check
+    $collisionProject = Join-Path $testRoot 'installer-collision'
+    Write-FixtureFile -Path (Join-Path $collisionProject 'README.md') -Content "# Collision Project`n"
+    $collidingDoc = Join-Path $collisionProject '.ai-dev-system/docs/INDEX.md'
+    $customDocContent = "# Pre-existing conflicting doc`nDo not overwrite.`n"
+    Write-FixtureFile -Path $collidingDoc -Content $customDocContent
+    $customContextPath = Join-Path $collisionProject '.ai-dev-system/PROJECT_CONTEXT.md'
+    $customContextContent = "# Project context`nPre-existing.`n"
+    Write-FixtureFile -Path $customContextPath -Content $customContextContent
+
+    $collisionPreview = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $collisionProject, '-OutputFormat', 'Json')
+    Assert-True ($collisionPreview.ExitCode -eq 0) 'Fresh install collision preview should succeed as a read-only query.'
+    $collisionPreviewReport = $collisionPreview.Output | ConvertFrom-Json
+    Assert-True ($collisionPreviewReport.proposal.action -eq 'BLOCKED') 'Collision preview should propose BLOCKED.'
+    Assert-True ((@($collisionPreviewReport.reasons) -match 'collide with system-managed destination paths').Count -gt 0) 'Collision preview should report collision reason.'
+    Assert-True (([System.IO.File]::ReadAllText($collidingDoc)) -eq $customDocContent) 'Collision preview modified colliding file.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $collisionProject 'AGENTS.md'))) 'Collision preview created AGENTS.md.'
+
+    $collisionApply = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $collisionProject, '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($collisionApply.ExitCode -eq 2) 'Fresh install collision without -Force should block apply.'
+    $collisionApplyReport = $collisionApply.Output | ConvertFrom-Json
+    Assert-True ($collisionApplyReport.result -eq 'BLOCKED') 'Collision apply should report BLOCKED.'
+    Assert-True (([System.IO.File]::ReadAllText($collidingDoc)) -eq $customDocContent) 'Blocked collision apply modified colliding file.'
+    Assert-True (([System.IO.File]::ReadAllText($customContextPath)) -eq $customContextContent) 'Blocked collision apply modified context file.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $collisionProject 'AGENTS.md'))) 'Blocked collision apply created AGENTS.md.'
+
+    $forcedCollisionApply = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $collisionProject, '-Apply', '-Force', '-OutputFormat', 'Json')
+    Assert-True ($forcedCollisionApply.ExitCode -eq 0) 'Fresh install collision with -Force should succeed.'
+    Assert-True (([System.IO.File]::ReadAllText($customContextPath)) -eq $customContextContent) 'Forced install overwrote PROJECT_CONTEXT.md.'
+    Assert-True (Test-Path -LiteralPath (Join-Path $collisionProject 'AGENTS.md') -PathType Leaf) 'Forced install did not create AGENTS.md.'
+    $passed.Add('installer fresh-install collision safety blocking and force override')
+
     $selfInstall = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $repositoryRoot, '-OutputFormat', 'Json')
     Assert-True ($selfInstall.ExitCode -ne 0) 'Installer should refuse self-installation into source repository.'
     $passed.Add('installer self-installation rejection')

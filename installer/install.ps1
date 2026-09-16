@@ -141,17 +141,6 @@ try {
     }
 
     $reasons = [System.Collections.Generic.List[string]]::new()
-    $actionBlocked = $false
-
-    if ($isGitRepository -and -not $gitClean) {
-        $reasons.Add('Target Git work tree has uncommitted changes.')
-        if ($Apply) { $actionBlocked = $true }
-    }
-
-    if ($Update -and -not $isInstalled) {
-        $reasons.Add('AI Dev System is not installed in the target project; run install first.')
-        $actionBlocked = $true
-    }
 
     # Discover source managed files
     $managedComponents = @('core', 'docs', 'gates', 'onboarding', 'templates', 'installer')
@@ -172,31 +161,91 @@ try {
     # Inspect target manifest and check for local modifications
     $targetManifest = $null
     $modifiedFiles = [System.Collections.Generic.List[string]]::new()
+    $hasBlocker = $false
 
-    if ($isInstalled -and (Test-Path -LiteralPath $targetManifestFile -PathType Leaf)) {
-        try {
-            $targetManifest = Get-Content -LiteralPath $targetManifestFile -Raw | ConvertFrom-Json
-            if ($null -ne $targetManifest -and $null -ne $targetManifest.files) {
-                foreach ($prop in $targetManifest.files.PSObject.Properties) {
-                    $rel = $prop.Name
-                    $recordedHash = $prop.Value
-                    $targetPath = Join-Path $targetSystemDir $rel
-                    if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
-                        $currentHash = Get-FileHashValue -Path $targetPath
-                        if ($currentHash -ne $recordedHash) {
-                            $modifiedFiles.Add($rel)
+    if ($isGitRepository -and -not $gitClean) {
+        $reasons.Add('Target Git work tree has uncommitted changes.')
+        $hasBlocker = $true
+    }
+
+    if ($Update -and -not $isInstalled) {
+        $reasons.Add('AI Dev System is not installed in the target project; run install first.')
+        $hasBlocker = $true
+    }
+
+    $filesProp = $null
+    if ($Update -and $isInstalled) {
+        if (-not (Test-Path -LiteralPath $targetManifestFile -PathType Leaf)) {
+            $reasons.Add('Cannot verify update safety: manifest.json is missing. Use -Force to overwrite.')
+            if (-not $Force) { $hasBlocker = $true }
+        } else {
+            try {
+                $targetManifest = Get-Content -LiteralPath $targetManifestFile -Raw | ConvertFrom-Json
+                $versionProp = if ($null -ne $targetManifest) { $targetManifest.PSObject.Properties['version'] } else { $null }
+                $hasValidVersion = ($null -ne $versionProp -and $null -ne $versionProp.Value -and $versionProp.Value.ToString().Trim().Length -gt 0)
+
+                $filesProp = if ($null -ne $targetManifest) { $targetManifest.PSObject.Properties['files'] } else { $null }
+                $hasValidFiles = ($null -ne $filesProp -and $null -ne $filesProp.Value -and (@($filesProp.Value.PSObject.Properties)).Count -gt 0)
+
+                if (-not $hasValidVersion -or -not $hasValidFiles) {
+                    $reasons.Add('Cannot verify update safety: manifest.json is incomplete (missing version or file entries). Use -Force to overwrite.')
+                    if (-not $Force) { $hasBlocker = $true }
+                } else {
+                    foreach ($prop in $filesProp.Value.PSObject.Properties) {
+                        $rel = $prop.Name
+                        $recordedHash = $prop.Value
+                        $targetPath = Join-Path $targetSystemDir $rel
+                        if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+                            $currentHash = Get-FileHashValue -Path $targetPath
+                            if ($currentHash -ne $recordedHash) {
+                                $modifiedFiles.Add($rel)
+                            }
                         }
                     }
+
+                    $unrecordedCollisions = [System.Collections.Generic.List[string]]::new()
+                    foreach ($rel in $sourceFiles.Keys) {
+                        $targetPath = Join-Path $targetSystemDir $rel
+                        if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+                            $recordedProp = $filesProp.Value.PSObject.Properties[$rel]
+                            if ($null -eq $recordedProp) {
+                                $targetHash = Get-FileHashValue -Path $targetPath
+                                if ($targetHash -ne $sourceFiles[$rel]) {
+                                    $unrecordedCollisions.Add($rel)
+                                }
+                            }
+                        }
+                    }
+                    if ($unrecordedCollisions.Count -gt 0) {
+                        $reasons.Add("Cannot verify update safety: destination contains unrecorded file(s) not tracked in manifest: $($unrecordedCollisions -join ', '). Use -Force to overwrite.")
+                        if (-not $Force) { $hasBlocker = $true }
+                    }
                 }
+            } catch {
+                $reasons.Add("Cannot verify update safety: manifest.json is malformed ($($_.Exception.Message)). Use -Force to overwrite.")
+                if (-not $Force) { $hasBlocker = $true }
             }
-        } catch {
-            $reasons.Add("Failed to parse existing manifest: $($_.Exception.Message)")
         }
     }
 
-    if ($modifiedFiles.Count -gt 0 -and -not $Force) {
+    if ($modifiedFiles.Count -gt 0) {
         $reasons.Add("System-managed file(s) contain local modifications: $($modifiedFiles -join ', '). Use -Force to overwrite.")
-        if ($Apply) { $actionBlocked = $true }
+        if (-not $Force) { $hasBlocker = $true }
+    }
+
+    # Fresh install collision check
+    if (-not $Update -and $isInstalled) {
+        $collidingFiles = [System.Collections.Generic.List[string]]::new()
+        foreach ($rel in $sourceFiles.Keys) {
+            $targetPath = Join-Path $targetSystemDir $rel
+            if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+                $collidingFiles.Add($rel)
+            }
+        }
+        if ($collidingFiles.Count -gt 0) {
+            $reasons.Add("Existing file(s) in .ai-dev-system/ collide with system-managed destination paths: $($collidingFiles -join ', '). Use -Force to overwrite or run with -Update.")
+            if (-not $Force) { $hasBlocker = $true }
+        }
     }
 
     # Compute delta
@@ -218,8 +267,8 @@ try {
         }
     }
 
-    if ($Update -and $null -ne $targetManifest -and $null -ne $targetManifest.files) {
-        foreach ($prop in $targetManifest.files.PSObject.Properties) {
+    if ($Update -and $null -ne $filesProp -and $null -ne $filesProp.Value) {
+        foreach ($prop in $filesProp.Value.PSObject.Properties) {
             $rel = $prop.Name
             if (-not $sourceFiles.ContainsKey($rel)) {
                 $removed.Add($rel)
@@ -276,7 +325,7 @@ $agentsBlockEnd
     }
 
     $mode = if ($Update) { 'UPDATE' } else { 'INSTALL' }
-    $proposedAction = if ($actionBlocked) {
+    $proposedAction = if ($hasBlocker) {
         'BLOCKED'
     } elseif ($Apply) {
         if ($Update) { 'UPDATED' } else { 'INSTALLED' }
@@ -284,8 +333,16 @@ $agentsBlockEnd
         if ($Update) { 'UPDATE' } else { 'INSTALL' }
     }
 
+    $reportResult = if ($hasBlocker -and $Apply) {
+        'BLOCKED'
+    } elseif ($Apply) {
+        'APPLIED'
+    } else {
+        'PREVIEW'
+    }
+
     $report = [pscustomobject][ordered]@{
-        result       = if ($actionBlocked) { 'BLOCKED' } elseif ($Apply) { 'APPLIED' } else { 'PREVIEW' }
+        result       = $reportResult
         mode         = $mode
         projectRoot  = $resolvedTarget
         version      = [pscustomobject][ordered]@{
@@ -312,14 +369,14 @@ $agentsBlockEnd
         reasons      = @($reasons)
     }
 
-    if ($actionBlocked) {
-        Write-InstallReport -Report $report -Format $OutputFormat
-        exit 2
-    }
-
     if (-not $Apply) {
         Write-InstallReport -Report $report -Format $OutputFormat
         exit 0
+    }
+
+    if ($hasBlocker) {
+        Write-InstallReport -Report $report -Format $OutputFormat
+        exit 2
     }
 
     # Execute Apply

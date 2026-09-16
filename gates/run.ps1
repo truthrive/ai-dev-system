@@ -7,6 +7,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '../onboarding/discovery.ps1')
 
 function New-GateResult {
     param(
@@ -84,14 +85,18 @@ $git = Get-Command git -ErrorAction SilentlyContinue
 $isGitWorkTree = $false
 $gitRoot = $null
 $hasGitMetadata = Test-Path -LiteralPath (Join-Path $resolvedRoot '.git')
+$gitRootOutput = @('Git is unavailable.')
 
 if ($null -ne $git) {
-    $gitRootOutput = @(& $git.Source -C $resolvedRoot rev-parse --show-toplevel 2>$null)
+    $gitRootOutput = @(& $git.Source -C $resolvedRoot rev-parse --show-toplevel 2>&1)
     if ($LASTEXITCODE -eq 0 -and $gitRootOutput.Count -gt 0) {
         $isGitWorkTree = $true
         $gitRoot = [System.IO.Path]::GetFullPath([string]$gitRootOutput[0])
     }
 }
+
+$gitAccessBlocked = -not $isGitWorkTree -and ($hasGitMetadata -or
+    ($null -ne $git -and ($gitRootOutput -join ' ') -notmatch 'not a git repository'))
 
 if ($isGitWorkTree) {
     $unstagedOutput = @(& $git.Source -C $gitRoot diff --check -- 2>&1)
@@ -105,13 +110,13 @@ if ($isGitWorkTree) {
     } else {
         $results.Add((New-GateResult -Id 'git.diff-check' -Status 'FAIL' -Summary 'Git reported whitespace errors.' -Details $details))
     }
-} elseif ($hasGitMetadata) {
+} elseif ($gitAccessBlocked) {
     $summary = if ($null -eq $git) {
         'Git metadata exists but Git is unavailable.'
     } else {
         'Git metadata exists but repository detection failed.'
     }
-    $results.Add((New-GateResult -Id 'git.diff-check' -Status 'BLOCKED' -Summary $summary))
+    $results.Add((New-GateResult -Id 'git.diff-check' -Status 'BLOCKED' -Summary $summary -Details @($gitRootOutput | ForEach-Object { [string]$_ })))
 } else {
     $results.Add((New-GateResult -Id 'git.diff-check' -Status 'SKIP' -Summary 'Target is not a Git work tree.'))
 }
@@ -120,15 +125,16 @@ $markdownFiles = @()
 $discoveryBlocked = $null
 
 try {
+    if ($gitAccessBlocked) { throw ($gitRootOutput -join "`n") }
     if ($isGitWorkTree) {
-        $relativeMarkdown = @(& $git.Source -C $gitRoot ls-files --cached --others --exclude-standard -- '*.md' 2>&1)
+        $relativeMarkdown = @(& $git.Source -c core.quotePath=false -C $gitRoot ls-files --cached --others --exclude-standard -- '*.md' 2>&1)
         if ($LASTEXITCODE -ne 0) {
             throw "Git could not enumerate Markdown files: $($relativeMarkdown -join ' ')"
         }
-        $markdownFiles = @($relativeMarkdown | ForEach-Object { Join-Path $gitRoot ([string]$_) } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+        $markdownFiles = @($relativeMarkdown | Where-Object { Test-DiscoveryFile $gitRoot ([string]$_) } | ForEach-Object { Join-Path $gitRoot ([string]$_) })
     } else {
-        $markdownFiles = @(Get-ChildItem -LiteralPath $resolvedRoot -Recurse -File -Filter '*.md' -ErrorAction Stop |
-            Where-Object { $_.FullName -notmatch '[\\/]\.git(?:[\\/]|$)' } |
+        $markdownFiles = @(Get-DiscoveryFiles $resolvedRoot |
+            Where-Object Extension -eq '.md' |
             Select-Object -ExpandProperty FullName)
     }
 } catch {

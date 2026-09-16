@@ -197,6 +197,69 @@ try {
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $unversionedActive '.ai-dev-system'))) 'Blocked unversioned apply created state.'
     $passed.Add('unverifiable-project blocking')
 
+    $discoveryProject = Join-Path $testRoot 'discovery-project'
+    Write-FixtureFile (Join-Path $discoveryProject '.gitignore') ".agent/`nprivate/`nnode_modules/`ndist/`n"
+    Write-FixtureFile (Join-Path $discoveryProject 'README.md') "# Discovery`n"
+    Write-FixtureFile (Join-Path $discoveryProject 'WEBSITE_CONTEXT_PACK.md') "# Existing context`n"
+    Write-FixtureFile (Join-Path $discoveryProject 'package.json') '{"scripts":{"test":"DO_NOT_EXECUTE"}}'
+    Initialize-FixtureRepository $discoveryProject @('.gitignore', 'README.md', 'WEBSITE_CONTEXT_PACK.md', 'package.json')
+    Write-FixtureFile (Join-Path $discoveryProject '.agent/skills/project/SKILL.md') '# Local instructions'
+    Write-FixtureFile (Join-Path $discoveryProject '.agent/private.md') '# Not an instruction'
+    Write-FixtureFile (Join-Path $discoveryProject 'private/AGENTS.md') '# Private'
+    Write-FixtureFile (Join-Path $discoveryProject 'node_modules/vendor/AGENTS.md') '# Vendor'
+    Write-FixtureFile (Join-Path $discoveryProject 'dist/README.md') '[Broken](missing.md)'
+    $contextBefore = Get-FileHashValue (Join-Path $discoveryProject 'WEBSITE_CONTEXT_PACK.md')
+    Push-Location $testRoot
+    try {
+        $discoveryPreview = Invoke-Tool $onboardingRunner @('-ProjectRoot', $discoveryProject, '-ProjectType', 'Active', '-OutputFormat', 'Json')
+    } finally { Pop-Location }
+    Assert-True ($discoveryPreview.ExitCode -eq 0) 'Preview from unrelated directory failed.'
+    $discoveryReport = $discoveryPreview.Output | ConvertFrom-Json
+    Assert-True ($discoveryReport.discovery.instructions.Count -eq 1) 'Unexpected ignored or vendor instructions.'
+    Assert-True ($discoveryReport.discovery.instructions -contains '.agent/skills/project/SKILL.md') 'Ignored instruction missing.'
+    Assert-True ($discoveryReport.discovery.context -contains 'WEBSITE_CONTEXT_PACK.md') 'Existing context missed.'
+    Assert-True ($discoveryReport.discovery.checkCandidates -contains 'package.json') 'Check candidate missing.'
+    Assert-True ($discoveryReport.discovery.verifiedCommands.Count -eq 0) 'Candidates became verified commands.'
+    Assert-True ($discoveryReport.discovery.prerequisites.Count -eq 0) 'Prerequisites were inferred.'
+    Assert-True ($discoveryReport.evidence.documentationClaims -contains 'WEBSITE_CONTEXT_PACK.md') 'Documentation not marked unverified.'
+    $duplicateApply = Invoke-Tool $onboardingRunner @('-ProjectRoot', $discoveryProject, '-ProjectType', 'Active', '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($duplicateApply.ExitCode -eq 2) 'Existing context must block duplicate creation.'
+    Assert-True (-not (Test-Path (Join-Path $discoveryProject '.ai-dev-system'))) 'Duplicate context created.'
+    Assert-True ((Get-FileHashValue (Join-Path $discoveryProject 'WEBSITE_CONTEXT_PACK.md')) -eq $contextBefore) 'Existing context changed.'
+    $passed.Add('ignored instructions, context, candidate evidence, unrelated working directory')
+
+    # Git's own test switch forces the ownership check, without safe.directory changes.
+    $previousOwnerSetting = [Environment]::GetEnvironmentVariable('GIT_TEST_ASSUME_DIFFERENT_OWNER')
+    try {
+        $env:GIT_TEST_ASSUME_DIFFERENT_OWNER = '1'
+        $ownershipPreview = Invoke-Tool $onboardingRunner @('-ProjectRoot', $discoveryProject, '-ProjectType', 'Active', '-OutputFormat', 'Json')
+        $ownershipApply = Invoke-Tool $onboardingRunner @('-ProjectRoot', $discoveryProject, '-ProjectType', 'Active', '-Apply', '-OutputFormat', 'Json')
+        $ownershipGate = Invoke-Tool $gateRunner @('-ProjectRoot', $discoveryProject, '-OutputFormat', 'Json')
+    } finally {
+        [Environment]::SetEnvironmentVariable('GIT_TEST_ASSUME_DIFFERENT_OWNER', $previousOwnerSetting)
+    }
+    Assert-True ($ownershipPreview.ExitCode -eq 2 -and $ownershipApply.ExitCode -eq 2) 'Ownership rejection must block preview and apply.'
+    $ownershipReport = $ownershipPreview.Output | ConvertFrom-Json
+    Assert-True ($ownershipReport.result -eq 'BLOCKED' -and $ownershipReport.error -match 'dubious ownership') 'Original ownership diagnostic missing.'
+    Assert-True ($ownershipGate.ExitCode -eq 2) 'Ownership failure must block gates.'
+    $ownershipGateReport = $ownershipGate.Output | ConvertFrom-Json
+    Assert-True (@($ownershipGateReport.gates | Where-Object status -ne 'BLOCKED').Count -eq 0) 'Gate fell back after ownership rejection.'
+    Assert-True (-not (Test-Path (Join-Path $discoveryProject '.ai-dev-system'))) 'Ownership failure wrote context.'
+    $passed.Add('Git ownership rejection with preserved diagnostic and no fallback')
+
+    $excludedProject = Join-Path $testRoot 'excluded-project'
+    Write-FixtureFile (Join-Path $excludedProject 'README.md') '# New'
+    foreach ($directory in @('node_modules', 'dist', '.astro', 'build', 'vendor', 'coverage')) {
+        Write-FixtureFile (Join-Path $excludedProject "$directory/AGENTS.md") '[Missing](absent.md)'
+        Write-FixtureFile (Join-Path $excludedProject "$directory/package.json") '{}'
+    }
+    $excludedPreview = Invoke-Tool $onboardingRunner @('-ProjectRoot', $excludedProject, '-ProjectType', 'New', '-OutputFormat', 'Json')
+    $excludedReport = $excludedPreview.Output | ConvertFrom-Json
+    Assert-True ($excludedReport.discovery.instructions.Count -eq 0 -and $excludedReport.discovery.checkCandidates.Count -eq 0) 'Excluded trees polluted discovery.'
+    $excludedGate = Invoke-Tool $gateRunner @('-ProjectRoot', $excludedProject, '-OutputFormat', 'Json')
+    Assert-True ($excludedGate.ExitCode -eq 0) 'Excluded generated links were scanned.'
+    $passed.Add('non-Git dependency and generated directory exclusions')
+
     foreach ($name in $passed) {
         "[PASS] $name"
     }

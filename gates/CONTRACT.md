@@ -40,3 +40,5 @@ Use `-OutputFormat Json` for structured output. The runner exits with `0` when a
 | `docs.local-links` | Markdown files are present | Confirms relative local link targets exist | Does not validate anchors, absolute paths, or remote URLs |
 
 The runner emits the gate ID, status, summary, and relevant details. Its output is evidence input and must be recorded under the [verification and evidence contract](../docs/verification-evidence.md).
+
+Repository access failures preserve Git's diagnostic and block both checks without filesystem fallback. Discovery uses the exclusions and symbolic-link restrictions documented in [onboarding](../docs/onboarding.md); excluded files are outside gate coverage.

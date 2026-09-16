@@ -12,6 +12,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'discovery.ps1')
+$gitAccessFailed = $false
 
 function ConvertTo-RelativePathList {
     param(
@@ -71,13 +73,14 @@ try {
     $gitChanges = @()
 
     if ($null -ne $gitCommand) {
-        $gitRootOutput = @(& $gitCommand.Source -C $resolvedRoot rev-parse --show-toplevel 2>$null)
+        $gitRootOutput = @(& $gitCommand.Source -C $resolvedRoot rev-parse --show-toplevel 2>&1)
         if ($LASTEXITCODE -eq 0 -and $gitRootOutput.Count -gt 0) {
             $isGitRepository = $true
             $gitRoot = [System.IO.Path]::GetFullPath([string]$gitRootOutput[0])
             $gitPrefixOutput = @(& $gitCommand.Source -C $resolvedRoot rev-parse --show-prefix 2>&1)
             if ($LASTEXITCODE -ne 0) {
-                throw "Git root comparison failed: $($gitPrefixOutput -join ' ')"
+                $gitAccessFailed = $true
+                throw "Git root comparison failed: $($gitPrefixOutput -join "`n")"
             }
             $isProjectGitRoot = [string]::IsNullOrEmpty(($gitPrefixOutput -join ''))
             if ($isProjectGitRoot) {
@@ -85,29 +88,63 @@ try {
             }
             $gitChanges = @(& $gitCommand.Source -C $gitRoot status --porcelain=v1 --untracked-files=all -- 2>&1 | ForEach-Object { [string]$_ })
             if ($LASTEXITCODE -ne 0) {
-                throw "Git status failed: $($gitChanges -join ' ')"
+                $gitAccessFailed = $true
+                throw "Git status failed: $($gitChanges -join "`n")"
             }
+        } elseif ((Test-Path -LiteralPath (Join-Path $resolvedRoot '.git')) -or
+            ($gitRootOutput -join ' ') -notmatch 'not a git repository') {
+            $gitAccessFailed = $true
+            throw ($gitRootOutput -join "`n")
         }
+    } elseif (Test-Path -LiteralPath (Join-Path $resolvedRoot '.git')) {
+        $gitAccessFailed = $true
+        throw 'Git metadata exists but Git is unavailable.'
     }
 
     if ($isGitRepository) {
-        $relativeFiles = @(& $gitCommand.Source -C $gitRoot ls-files --cached --others --exclude-standard 2>&1)
+        $relativeFiles = @(& $gitCommand.Source -c core.quotePath=false -C $gitRoot ls-files --cached --others --exclude-standard 2>&1)
         if ($LASTEXITCODE -ne 0) {
+            $gitAccessFailed = $true
             throw "Git file discovery failed: $($relativeFiles -join ' ')"
         }
         $projectFiles = @($relativeFiles |
+            Where-Object { Test-DiscoveryFile $gitRoot ([string]$_) } |
             ForEach-Object { Join-Path $gitRoot ([string]$_) } |
             Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
             ForEach-Object { Get-Item -LiteralPath $_ -Force })
         $discoveryTruncated = $false
     } else {
-        $projectFiles = @(Get-ChildItem -LiteralPath $resolvedRoot -Recurse -File -Force -ErrorAction Stop |
-            Where-Object { $_.FullName -notmatch '[\\/]\.git(?:[\\/]|$)' } |
-            Sort-Object FullName |
+        $projectFiles = @(Get-DiscoveryFiles $resolvedRoot |
             Select-Object -First 10000)
         $discoveryTruncated = $projectFiles.Count -eq 10000
     }
 
+    # Probe only named ignored instruction files, never arbitrary ignored trees.
+    $knownInstructions = @('AGENTS.md', 'CLAUDE.md', '.cursorrules', '.github/copilot-instructions.md')
+    foreach ($skillsPath in @('.agent/skills', '.agents/skills', '.codex/skills')) {
+        $skillsDirectory = Join-Path $resolvedRoot $skillsPath
+        $safeParents = $true
+        $parentPath = $resolvedRoot
+        foreach ($part in ($skillsPath -split '/')) {
+            $parentPath = Join-Path $parentPath $part
+            if (-not (Test-Path -LiteralPath $parentPath -PathType Container) -or
+                ((Get-Item -LiteralPath $parentPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                $safeParents = $false
+                break
+            }
+        }
+        if ($safeParents) {
+            foreach ($folder in Get-ChildItem -LiteralPath $skillsDirectory -Directory -Force) {
+                $knownInstructions += "$skillsPath/$($folder.Name)/SKILL.md"
+            }
+        }
+    }
+    foreach ($path in $knownInstructions) {
+        if (Test-DiscoveryFile $resolvedRoot $path) {
+            $projectFiles += Get-Item -LiteralPath (Join-Path $resolvedRoot $path) -Force
+        }
+    }
+    $projectFiles = @($projectFiles | Sort-Object FullName -Unique)
     $relative = @{}
     foreach ($file in $projectFiles) {
         $relative[$file.FullName] = [System.IO.Path]::GetRelativePath($resolvedRoot, $file.FullName).Replace('\', '/')
@@ -119,12 +156,13 @@ try {
         $_.Name -match '^CONTRIBUTING(?:\..+)?$' -or
         $_.Name -eq '.cursorrules' -or
         $_.Name -eq 'copilot-instructions.md' -or
+        $path -match '^\.(agent|agents|codex)/skills/[^/]+/SKILL\.md$' -or
         $path -match '^\.cursor/rules/'
     })
 
     $contextFiles = @($projectFiles | Where-Object {
         $path = $relative[$_.FullName]
-        $path -match '(^|/)(PROJECT_CONTEXT\.md|project-context\.md)$' -or
+        $path -match '(^|/)(PROJECT_CONTEXT\.md|project-context\.md|WEBSITE_CONTEXT_PACK\.md)$' -or
         $path -eq 'docs/context.md'
     })
 
@@ -145,7 +183,7 @@ try {
     $documentationFiles = @($projectFiles | Where-Object {
         $path = $relative[$_.FullName]
         $_.Name -match '^(README|CHANGELOG|ARCHITECTURE|CONTRIBUTING)(\..+)?$' -or
-        $path -match '^docs/'
+        $path -match '^docs/' -or $_.Name -eq 'WEBSITE_CONTEXT_PACK.md'
     })
 
     $instructions = @(ConvertTo-RelativePathList -Files $instructionFiles -Root $resolvedRoot)
@@ -202,8 +240,18 @@ try {
             context      = @($contexts)
             conventions  = @($conventions)
             checks       = @($checks)
+            checkCandidates = @($checks)
+            verifiedCommands = @()
+            prerequisites = @()
+            checkVerification = 'Not performed. Inspect candidate contents and verify prerequisites separately; no commands executed.'
             documentation = @($documentation)
             truncated    = $discoveryTruncated
+        }
+        evidence = [pscustomobject]@{
+            verifiedFacts = @('Listed paths exist; Git state is observed when available. Project type is user-supplied.')
+            documentationClaims = @($documentation + $contexts | Sort-Object -Unique)
+            unknowns = @('Runtime behavior', 'Documentation accuracy', 'Verified check commands and prerequisites')
+            sourceReferences = @($instructions + $contexts + $conventions + $checks + $documentation | Sort-Object -Unique)
         }
         proposal     = [pscustomobject][ordered]@{
             action  = $proposalAction
@@ -263,7 +311,7 @@ try {
     exit 0
 } catch {
     $failure = [pscustomobject][ordered]@{
-        result      = 'ERROR'
+        result      = if ($gitAccessFailed) { 'BLOCKED' } else { 'ERROR' }
         projectRoot = $ProjectRoot
         projectType = $ProjectType
         error       = $_.Exception.Message
@@ -271,8 +319,9 @@ try {
     if ($OutputFormat -eq 'Json') {
         $failure | ConvertTo-Json -Depth 4
     } else {
-        "RESULT: ERROR"
+        "RESULT: $($failure.result)"
         "ERROR: $($_.Exception.Message)"
     }
+    if ($gitAccessFailed) { exit 2 }
     exit 1
 }

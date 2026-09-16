@@ -6,15 +6,17 @@ This is the central router for AI Dev System. Start with the constitution, selec
 | --- | --- | --- |
 | Constitution | [Default constitution](../core/constitution/default.md) | Available: shared development principles |
 | Roadmap | [ROADMAP.md](ROADMAP.md) | Available: milestone outcomes |
+| Onboarding | [onboarding.md](onboarding.md) | Available: preview-first onboarding for new, active, and legacy projects |
+| Verification evidence | [verification-evidence.md](verification-evidence.md) | Available: required evidence fields and result semantics |
 | Architecture docs | [architecture/](architecture/) | Not implemented; reserved for system architecture documentation |
 | Decisions | [decisions/](decisions/) | Not implemented; reserved for architectural decision records |
 | Rules | See below | Available: six technology-agnostic rules |
 | Skills | See below | Available: seven lifecycle skills |
 | Workflows | See below | Available: feature, bugfix, and refactor |
-| Gates | [gates/](../gates/) | Not implemented; reserved for deterministic quality gates |
-| Templates | [templates/](../templates/) | Not implemented |
+| Gates | [Gate contract](../gates/CONTRACT.md) and [runner](../gates/run.ps1) | Available: Git diff and local Markdown-link checks |
+| Templates | [Project context](../templates/project-context.md) and [verification evidence](../templates/verification-evidence.md) | Available |
 | Installer | [installer/](../installer/) | Not implemented |
-| Tests | [tests/](../tests/) | Not implemented |
+| Tests | [M2 verification harness](../tests/run.ps1) | Available: isolated gate and onboarding fixtures |
 
 ## Rules
 
@@ -40,5 +42,11 @@ This is the central router for AI Dev System. Start with the constitution, selec
 - [Feature](../core/workflows/feature.md) — new capabilities or intentional behavior changes
 - [Bugfix](../core/workflows/bugfix.md) — defects with reproduction or assessment, diagnosis, correction, and regression verification
 - [Refactor](../core/workflows/refactor.md) — structural change with baseline and behavioral preservation
+
+## Enforcement and onboarding
+
+- Use the [gate contract and runner](../gates/CONTRACT.md) for the implemented read-only deterministic checks.
+- Follow the [verification and evidence contract](verification-evidence.md) when reporting results.
+- Use [project onboarding](onboarding.md) to inspect a target and create a missing project-context file without replacing existing work.
 
 See the [README](../README.md) for scope and intended lifecycle, [VERSION](../VERSION) for the development version, and [CHANGELOG](../CHANGELOG.md) for recorded changes. Add routes as real documentation or implementations become available.

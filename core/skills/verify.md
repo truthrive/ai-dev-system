@@ -8,6 +8,8 @@ Produce evidence that the implementation satisfies its success criteria and pres
 
 Use after implementation and before completion is claimed. Use again after any corrective change that affects prior evidence.
 
+Follow the [verification and evidence contract](../../docs/verification-evidence.md) for result semantics and reporting.
+
 ## Inputs
 
 - Success criteria or explicit expected behavior.
@@ -24,7 +26,7 @@ Use after implementation and before completion is claimed. Use again after any c
 
 1. Confirm the diff matches the intended scope.
 2. Map each success criterion and preserved invariant to an executable check or other concrete evidence.
-3. Run the narrowest relevant checks, then broader checks when risk or project policy requires them.
+3. Run the narrowest relevant project-native checks and applicable deterministic [gates](../../gates/CONTRACT.md), then broaden when risk or project policy requires it.
 4. Record commands or actions, results, and evidence without omitting failures.
 5. Distinguish implementation failures, environment failures, and pre-existing failures.
 6. Identify criteria that remain unverified and why.

@@ -4,13 +4,13 @@ A reusable, context-first, specification-driven AI development system for coding
 
 AI Dev System exists to make development deliberate, changes small, and completion verifiable across technology stacks and coding agents. It provides a shared foundation for reusable rules, skills, and workflows, guided by evidence from real project work.
 
-**Status: early development (`0.1.0-dev`).** Milestone 1 provides the technology-agnostic core operating model. Automated gates, project onboarding, installer, templates, and distribution remain future work; see the [roadmap](docs/ROADMAP.md).
+**Status: early development (`0.1.0-dev`).** Milestones 1 and 2 provide the technology-agnostic operating model, minimal deterministic gates, evidence requirements, and safe project onboarding. Full installation, update, distribution, and stack-specific integrations remain future work; see the [roadmap](docs/ROADMAP.md).
 
 ## Intended lifecycle
 
 Intent → Context → Specification → Plan → Tasks → Implementation → Verification → Convergence → Evidence
 
-Start with the desired outcome, inspect the project, and define success criteria before planning and implementing small tasks. Verification checks those criteria; convergence resolves gaps between the implementation and specification; evidence records what was checked and the results. Deterministic quality gates are an intended part of verification, with implementation deferred to a later phase.
+Start with the desired outcome, inspect the project, and define success criteria before planning and implementing small tasks. Verification checks those criteria; convergence resolves gaps between the implementation and specification; evidence records what was checked and the results. Project-native checks remain authoritative, supplemented by the implemented read-only gates where applicable.
 
 ## Core operating model
 
@@ -21,6 +21,18 @@ Milestone 1 implements:
 - distinct workflows for features, bugfixes, and behavior-preserving refactors.
 
 The [documentation index](docs/INDEX.md) routes agents to the implemented material. The feature workflow follows the full lifecycle. Bugfixes may use explicit expected behavior instead of manufacturing a full specification, while refactors establish a behavioral baseline before changing structure.
+
+## Enforcement and onboarding
+
+Milestone 2 adds:
+
+- a [technology-agnostic gate contract](gates/CONTRACT.md) and runner for Git whitespace errors and broken relative Markdown links;
+- a [verification and evidence contract](docs/verification-evidence.md) with explicit pass, fail, and blocked semantics;
+- [preview-first onboarding](docs/onboarding.md) that discovers instructions, context, conventions, checks, documentation, and uncommitted work before creating a project-context file;
+- reusable [project-context](templates/project-context.md) and [verification-evidence](templates/verification-evidence.md) templates;
+- isolated fixture checks for non-destructive behavior and failure handling.
+
+Onboarding creates no project instruction file and refuses to overwrite recognized context or operate on dirty active and legacy projects.
 
 ## Separation of concerns
 

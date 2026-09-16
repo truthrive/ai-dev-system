@@ -21,3 +21,4 @@
 - Expanded the README with the system's purpose, intended lifecycle, separation of concerns, project support, and early-development status.
 - Updated agent and documentation routing to expose the implemented Milestone 1 capabilities.
 - Updated verification and routing documentation to expose implemented Milestone 2 enforcement and onboarding capabilities.
+- Improved onboarding discovery for immediate child Git repositories, test setup/configuration files, and package declarations based on real-project validation.

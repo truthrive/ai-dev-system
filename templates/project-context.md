@@ -38,11 +38,13 @@ Record claims from existing documentation with a file/section reference. Validat
 
 {{CONVENTIONS}}
 
-## Checks and test entrypoints
+## Checks, test setup, and declarations
 
-The following files are candidates discovered during onboarding. Inspect them to identify the authoritative commands; do not infer commands from filenames alone.
+The following files are check entrypoint candidates discovered during onboarding. Inspect them to identify the authoritative commands; do not infer commands from filenames alone.
 
 {{CHECKS}}
+
+Test setup/configuration files and package-script or lockfile declarations must be recorded separately after inspection. They are not commands or verified prerequisites.
 
 Verified commands: none established by onboarding.
 Prerequisites: not verified. Record required tools, versions, environment, and source references after inspection. Discovery never executes check candidates.

@@ -71,6 +71,9 @@ try {
     $isProjectGitRoot = $false
     $gitRoot = $null
     $gitChanges = @()
+    $childGitRepositories = @()
+    $childGitDiscoveryIssues = @()
+    $childGitDirectories = @()
 
     if ($null -ne $gitCommand) {
         $gitRootOutput = @(& $gitCommand.Source -C $resolvedRoot rev-parse --show-toplevel 2>&1)
@@ -101,6 +104,37 @@ try {
         throw 'Git metadata exists but Git is unavailable.'
     }
 
+    if (-not $isGitRepository -and $null -ne $gitCommand) {
+        foreach ($child in Get-ChildItem -LiteralPath $resolvedRoot -Directory -Force) {
+            if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                -not (Test-DiscoveryPath $child.Name)) { continue }
+            if (-not (Test-Path -LiteralPath (Join-Path $child.FullName '.git'))) { continue }
+            $childGitDirectories += [System.IO.Path]::GetFullPath($child.FullName)
+
+            $childRootOutput = @(& $gitCommand.Source -C $child.FullName rev-parse --show-toplevel 2>&1)
+            if ($LASTEXITCODE -eq 0 -and $childRootOutput.Count -gt 0) {
+                $childRoot = [System.IO.Path]::GetFullPath([string]$childRootOutput[0])
+                $childPrefixOutput = @(& $gitCommand.Source -C $child.FullName rev-parse --show-prefix 2>&1)
+                if ($LASTEXITCODE -eq 0 -and [string]::IsNullOrEmpty(($childPrefixOutput -join ''))) {
+                    $childGitRepositories += [pscustomobject][ordered]@{
+                        path = [System.IO.Path]::GetRelativePath($resolvedRoot, $child.FullName).Replace('\', '/')
+                        root = $childRoot
+                    }
+                } elseif ($LASTEXITCODE -ne 0) {
+                    $childGitDiscoveryIssues += [pscustomobject][ordered]@{
+                        path  = [System.IO.Path]::GetRelativePath($resolvedRoot, $child.FullName).Replace('\', '/')
+                        error = $childPrefixOutput -join "`n"
+                    }
+                }
+            } else {
+                $childGitDiscoveryIssues += [pscustomobject][ordered]@{
+                    path  = [System.IO.Path]::GetRelativePath($resolvedRoot, $child.FullName).Replace('\', '/')
+                    error = $childRootOutput -join "`n"
+                }
+            }
+        }
+    }
+
     if ($isGitRepository) {
         $relativeFiles = @(& $gitCommand.Source -c core.quotePath=false -C $gitRoot ls-files --cached --others --exclude-standard 2>&1)
         if ($LASTEXITCODE -ne 0) {
@@ -114,7 +148,7 @@ try {
             ForEach-Object { Get-Item -LiteralPath $_ -Force })
         $discoveryTruncated = $false
     } else {
-        $projectFiles = @(Get-DiscoveryFiles $resolvedRoot |
+        $projectFiles = @(Get-DiscoveryFiles -Root $resolvedRoot -SkipDirectories $childGitDirectories |
             Select-Object -First 10000)
         $discoveryTruncated = $projectFiles.Count -eq 10000
     }
@@ -169,15 +203,47 @@ try {
     $conventionFiles = @($projectFiles | Where-Object {
         $path = $relative[$_.FullName]
         $_.Name -in @('.editorconfig', '.gitattributes', '.gitignore') -or
-        $_.Name -match '(?i)(lint|format|style|prettier|eslint)' -or
+        $_.Name -match '^(?i)(eslint|prettier|stylelint|biome|tailwind)(?:\.config)?\.' -or
+        $_.Name -match '^(?i)\.(prettierrc|stylelintrc|eslintrc)(?:\..+)?$' -or
         $path -match '^\.github/(?!workflows/)'
     })
 
     $checkFiles = @($projectFiles | Where-Object {
         $path = $relative[$_.FullName]
         $_.Name -in @('Makefile', 'justfile', 'package.json', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'pom.xml', 'build.gradle', 'build.gradle.kts') -or
-        $path -match '(^|/)(tests?|specs?)(/|$)' -or
         $path -match '^\.github/workflows/'
+    })
+
+    $testSetupFiles = @($projectFiles | Where-Object {
+        $path = $relative[$_.FullName]
+        $path -match '(^|/)(tests?|specs?)/(setup|server-only)\.[^/]+$' -or
+        $_.Name -match '^(?i)(vitest|jest|playwright|cypress)\.config\.'
+    })
+
+    $packageScriptDeclarations = [System.Collections.Generic.List[object]]::new()
+    foreach ($packageFile in @($projectFiles | Where-Object { $_.Name -eq 'package.json' })) {
+        $packagePath = $relative[$packageFile.FullName]
+        try {
+            $package = [System.IO.File]::ReadAllText($packageFile.FullName) | ConvertFrom-Json
+            $scripts = if ($null -eq $package.scripts) { @() } else { @($package.scripts.psobject.Properties.Name | Sort-Object) }
+            $packageScriptDeclarations.Add([pscustomobject][ordered]@{ path = $packagePath; scripts = $scripts })
+        } catch {
+            $packageScriptDeclarations.Add([pscustomobject][ordered]@{ path = $packagePath; scripts = @(); parseError = $_.Exception.Message })
+        }
+    }
+    $lockfileDeclarations = @($projectFiles | Where-Object {
+        $_.Name -in @('package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'bun.lock')
+    } | ForEach-Object {
+        [pscustomobject][ordered]@{
+            path = $relative[$_.FullName]
+            packageManager = switch ($_.Name) {
+                'package-lock.json' { 'npm' }
+                'npm-shrinkwrap.json' { 'npm' }
+                'yarn.lock' { 'yarn' }
+                'pnpm-lock.yaml' { 'pnpm' }
+                default { 'bun' }
+            }
+        }
     })
 
     $documentationFiles = @($projectFiles | Where-Object {
@@ -190,6 +256,8 @@ try {
     $contexts = @(ConvertTo-RelativePathList -Files $contextFiles -Root $resolvedRoot)
     $conventions = @(ConvertTo-RelativePathList -Files $conventionFiles -Root $resolvedRoot)
     $checks = @(ConvertTo-RelativePathList -Files $checkFiles -Root $resolvedRoot)
+    $testSetup = @(ConvertTo-RelativePathList -Files $testSetupFiles -Root $resolvedRoot)
+    $declarationPaths = @($packageScriptDeclarations | ForEach-Object { $_.path }) + @($lockfileDeclarations | ForEach-Object { $_.path })
     $documentation = @(ConvertTo-RelativePathList -Files $documentationFiles -Root $resolvedRoot)
 
     $contextDirectory = Join-Path $resolvedRoot '.ai-dev-system'
@@ -208,6 +276,12 @@ try {
     }
     if (-not $isGitRepository -and $ProjectType -in @('Active', 'Legacy')) {
         $blockers.Add('Active and legacy onboarding requires a Git work tree so existing changes can be verified.')
+    }
+    if ($childGitRepositories.Count -gt 0) {
+        $blockers.Add('Target contains immediate child Git repositories; select one Git root explicitly before onboarding.')
+    }
+    if ($childGitDiscoveryIssues.Count -gt 0) {
+        $blockers.Add('Git metadata in an immediate child could not be verified; inspect the reported diagnostic before onboarding.')
     }
     if (-not (Test-Path -LiteralPath $templatePath -PathType Leaf)) {
         $blockers.Add('The project-context template is unavailable.')
@@ -241,9 +315,16 @@ try {
             conventions  = @($conventions)
             checks       = @($checks)
             checkCandidates = @($checks)
+            testSetupFiles = @($testSetup)
+            childGitRepositories = @($childGitRepositories)
+            childGitDiscoveryIssues = @($childGitDiscoveryIssues)
+            declarations = [pscustomobject][ordered]@{
+                packageScripts = @($packageScriptDeclarations.ToArray())
+                lockfiles = @($lockfileDeclarations)
+            }
             verifiedCommands = @()
             prerequisites = @()
-            checkVerification = 'Not performed. Inspect candidate contents and verify prerequisites separately; no commands executed.'
+            checkVerification = 'Not performed. Check candidates, test setup files, package scripts, and lockfiles are declarations only; no commands executed.'
             documentation = @($documentation)
             truncated    = $discoveryTruncated
         }
@@ -251,7 +332,9 @@ try {
             verifiedFacts = @('Listed paths exist; Git state is observed when available. Project type is user-supplied.')
             documentationClaims = @($documentation + $contexts | Sort-Object -Unique)
             unknowns = @('Runtime behavior', 'Documentation accuracy', 'Verified check commands and prerequisites')
-            sourceReferences = @($instructions + $contexts + $conventions + $checks + $documentation | Sort-Object -Unique)
+            sourceReferences = @($instructions + $contexts + $conventions + $checks + $testSetup + $documentation + $declarationPaths | Sort-Object -Unique)
+            childGitRepositories = @($childGitRepositories)
+            childGitDiscoveryIssues = @($childGitDiscoveryIssues)
         }
         proposal     = [pscustomobject][ordered]@{
             action  = $proposalAction

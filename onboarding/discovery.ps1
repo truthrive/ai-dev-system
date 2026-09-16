@@ -5,11 +5,17 @@ function Test-DiscoveryPath {
 }
 
 function Get-DiscoveryFiles {
-    param([string]$Root)
+    param(
+        [string]$Root,
+        [string[]]$SkipDirectories = @()
+    )
     foreach ($entry in Get-ChildItem -LiteralPath $Root -Force -ErrorAction Stop) {
         if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
         if (-not (Test-DiscoveryPath $entry.Name)) { continue }
-        if ($entry.PSIsContainer) { Get-DiscoveryFiles $entry.FullName } else { $entry }
+        if ($entry.PSIsContainer) {
+            if ($SkipDirectories -contains [System.IO.Path]::GetFullPath($entry.FullName)) { continue }
+            Get-DiscoveryFiles -Root $entry.FullName -SkipDirectories $SkipDirectories
+        } else { $entry }
     }
 }
 

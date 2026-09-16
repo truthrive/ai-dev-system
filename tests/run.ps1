@@ -260,6 +260,36 @@ try {
     Assert-True ($excludedGate.ExitCode -eq 0) 'Excluded generated links were scanned.'
     $passed.Add('non-Git dependency and generated directory exclusions')
 
+    $parentProject = Join-Path $testRoot 'project-container'
+    $nestedProject = Join-Path $parentProject 'nested-project'
+    Write-FixtureFile (Join-Path $parentProject 'README.md') '# Project container'
+    Write-FixtureFile (Join-Path $nestedProject 'README.md') '# Nested project'
+    Write-FixtureFile (Join-Path $nestedProject 'package.json') '{"scripts":{"lint":"fixture-lint","test":"fixture-test"}}'
+    Write-FixtureFile (Join-Path $nestedProject 'package-lock.json') '{"lockfileVersion":3}'
+    Write-FixtureFile (Join-Path $nestedProject 'eslint.config.mjs') 'export default [];'
+    Write-FixtureFile (Join-Path $nestedProject 'src/test/setup.ts') 'export {};'
+    Write-FixtureFile (Join-Path $nestedProject 'src/components/setup-information-panel.tsx') 'export {};'
+    Initialize-FixtureRepository $nestedProject @('README.md', 'package.json', 'package-lock.json', 'eslint.config.mjs', 'src/test/setup.ts', 'src/components/setup-information-panel.tsx')
+    $parentPreview = Invoke-Tool $onboardingRunner @('-ProjectRoot', $parentProject, '-ProjectType', 'Active', '-OutputFormat', 'Json')
+    Assert-True ($parentPreview.ExitCode -eq 0) 'Parent preview with immediate Git child failed.'
+    $parentReport = $parentPreview.Output | ConvertFrom-Json
+    Assert-True ((@($parentReport.discovery.childGitRepositories | ForEach-Object { $_.path }) -contains 'nested-project')) 'Immediate child Git root was not reported.'
+    Assert-True ($parentReport.proposal.action -eq 'BLOCKED' -and $parentReport.proposal.reasons -match 'select one Git root explicitly') 'Parent did not require explicit child selection.'
+    Assert-True ($parentReport.discovery.instructions.Count -eq 0) 'Parent discovery entered the nested repository.'
+    $parentApply = Invoke-Tool $onboardingRunner @('-ProjectRoot', $parentProject, '-ProjectType', 'Active', '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($parentApply.ExitCode -eq 2 -and -not (Test-Path (Join-Path $parentProject '.ai-dev-system'))) 'Nested Git parent apply was not safely blocked.'
+    $nestedPreview = Invoke-Tool $onboardingRunner @('-ProjectRoot', $nestedProject, '-ProjectType', 'Active', '-OutputFormat', 'Json')
+    Assert-True ($nestedPreview.ExitCode -eq 0) 'Nested Git project preview failed.'
+    $nestedReport = $nestedPreview.Output | ConvertFrom-Json
+    Assert-True ($nestedReport.discovery.conventions -contains 'eslint.config.mjs') 'Declared lint configuration was not a convention.'
+    Assert-True (-not ($nestedReport.discovery.conventions -contains 'src/components/setup-information-panel.tsx')) 'UI component was classified as a convention.'
+    Assert-True ($nestedReport.discovery.testSetupFiles -contains 'src/test/setup.ts') 'Test setup was not reported separately.'
+    Assert-True (-not ($nestedReport.discovery.checkCandidates -contains 'src/test/setup.ts')) 'Test setup was classified as a check entrypoint.'
+    Assert-True ($nestedReport.discovery.declarations.packageScripts[0].scripts -contains 'test') 'Package script declaration was not reported.'
+    Assert-True ($nestedReport.discovery.declarations.lockfiles.packageManager -contains 'npm') 'Lockfile indicator was not reported.'
+    Assert-True ($nestedReport.discovery.verifiedCommands.Count -eq 0 -and $nestedReport.discovery.prerequisites.Count -eq 0) 'Declarations became verified execution evidence.'
+    $passed.Add('nested Git selection, declaration evidence, and classification boundaries')
+
     foreach ($name in $passed) {
         "[PASS] $name"
     }

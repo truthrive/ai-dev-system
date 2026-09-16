@@ -290,6 +290,22 @@ try {
     Assert-True ($nestedReport.discovery.verifiedCommands.Count -eq 0 -and $nestedReport.discovery.prerequisites.Count -eq 0) 'Declarations became verified execution evidence.'
     $passed.Add('nested Git selection, declaration evidence, and classification boundaries')
 
+    $noScriptsProject = Join-Path $testRoot 'package-without-scripts'
+    Write-FixtureFile (Join-Path $noScriptsProject 'package.json') '{"name":"no-scripts"}'
+    $noScriptsPreview = Invoke-Tool $onboardingRunner @('-ProjectRoot', $noScriptsProject, '-ProjectType', 'New', '-OutputFormat', 'Json')
+    Assert-True ($noScriptsPreview.ExitCode -eq 0) 'Valid package without scripts should not block preview.'
+    $noScriptsDeclaration = ($noScriptsPreview.Output | ConvertFrom-Json).discovery.declarations.packageScripts[0]
+    Assert-True ((@($noScriptsDeclaration.scripts).Count -eq 0)) 'Package without scripts must report no declared scripts.'
+    Assert-True ($null -eq $noScriptsDeclaration.PSObject.Properties['parseError']) 'Package without scripts was reported as invalid JSON.'
+
+    $invalidPackageProject = Join-Path $testRoot 'invalid-package-json'
+    Write-FixtureFile (Join-Path $invalidPackageProject 'package.json') '{invalid json'
+    $invalidPackagePreview = Invoke-Tool $onboardingRunner @('-ProjectRoot', $invalidPackageProject, '-ProjectType', 'New', '-OutputFormat', 'Json')
+    Assert-True ($invalidPackagePreview.ExitCode -eq 0) 'Invalid package JSON should remain a non-fatal declaration error.'
+    $invalidPackageDeclaration = ($invalidPackagePreview.Output | ConvertFrom-Json).discovery.declarations.packageScripts[0]
+    Assert-True ($invalidPackageDeclaration.PSObject.Properties['parseError'].Value.Length -gt 0) 'Invalid package JSON must retain a parse error.'
+    $passed.Add('package declaration StrictMode and invalid JSON handling')
+
     foreach ($name in $passed) {
         "[PASS] $name"
     }

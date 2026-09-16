@@ -225,10 +225,15 @@ try {
         $packagePath = $relative[$packageFile.FullName]
         try {
             $package = [System.IO.File]::ReadAllText($packageFile.FullName) | ConvertFrom-Json
-            $scripts = if ($null -eq $package.scripts) { @() } else { @($package.scripts.psobject.Properties.Name | Sort-Object) }
-            $packageScriptDeclarations.Add([pscustomobject][ordered]@{ path = $packagePath; scripts = $scripts })
+            $scriptsProperty = $package.PSObject.Properties['scripts']
+            $scripts = if ($null -eq $scriptsProperty -or $null -eq $scriptsProperty.Value) {
+                @()
+            } else {
+                @($scriptsProperty.Value.PSObject.Properties.Name | Sort-Object)
+            }
+            $packageScriptDeclarations.Add([pscustomobject][ordered]@{ path = $packagePath; scripts = [string[]]@($scripts) })
         } catch {
-            $packageScriptDeclarations.Add([pscustomobject][ordered]@{ path = $packagePath; scripts = @(); parseError = $_.Exception.Message })
+            $packageScriptDeclarations.Add([pscustomobject][ordered]@{ path = $packagePath; scripts = [string[]]@(); parseError = $_.Exception.Message })
         }
     }
     $lockfileDeclarations = @($projectFiles | Where-Object {

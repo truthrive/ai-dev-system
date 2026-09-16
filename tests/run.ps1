@@ -502,6 +502,67 @@ try {
     Assert-True (Test-Path -LiteralPath (Join-Path $collisionProject 'AGENTS.md') -PathType Leaf) 'Forced install did not create AGENTS.md.'
     $passed.Add('installer fresh-install collision safety blocking and force override')
 
+    # Manifest path traversal rejection
+    $traversalProject = Join-Path $testRoot 'updater-path-traversal'
+    Write-FixtureFile -Path (Join-Path $traversalProject 'README.md') -Content "# Traversal Project`n"
+    $outsideFilePath = Join-Path $traversalProject 'outside.txt'
+    $outsideContent = "Critical project file outside .ai-dev-system`n"
+    Write-FixtureFile -Path $outsideFilePath -Content $outsideContent
+    $null = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $traversalProject, '-Apply')
+    $traversalManifestPath = Join-Path $traversalProject '.ai-dev-system/manifest.json'
+    Write-FixtureFile -Path $traversalManifestPath -Content '{"version":"1.0.0","files":{"../../outside.txt":"dummyhash","VERSION":"dummy"}}'
+
+    $traversalPreview = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $traversalProject, '-OutputFormat', 'Json')
+    Assert-True ($traversalPreview.ExitCode -eq 0) 'Traversal manifest preview should succeed as a read-only query.'
+    $traversalPreviewReport = $traversalPreview.Output | ConvertFrom-Json
+    Assert-True ($traversalPreviewReport.proposal.action -eq 'BLOCKED') 'Traversal manifest preview should propose BLOCKED.'
+    Assert-True ((@($traversalPreviewReport.reasons) -match 'unsafe path entry').Count -gt 0) 'Traversal manifest preview should report unsafe path reason.'
+    Assert-True (([System.IO.File]::ReadAllText($outsideFilePath)) -eq $outsideContent) 'Traversal preview modified outside file.'
+
+    $traversalApply = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $traversalProject, '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($traversalApply.ExitCode -eq 2) 'Traversal manifest apply without -Force must block.'
+    $traversalApplyReport = $traversalApply.Output | ConvertFrom-Json
+    Assert-True ($traversalApplyReport.result -eq 'BLOCKED') 'Traversal manifest apply should report BLOCKED.'
+    Assert-True (([System.IO.File]::ReadAllText($outsideFilePath)) -eq $outsideContent) 'Blocked traversal update modified outside file.'
+
+    $forcedTraversalApply = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $traversalProject, '-Apply', '-Force', '-OutputFormat', 'Json')
+    Assert-True ($forcedTraversalApply.ExitCode -eq 2) 'Traversal manifest apply with -Force must STILL block.'
+    $forcedTraversalReport = $forcedTraversalApply.Output | ConvertFrom-Json
+    Assert-True ($forcedTraversalReport.result -eq 'BLOCKED') 'Forced traversal manifest apply should report BLOCKED.'
+    Assert-True (Test-Path -LiteralPath $outsideFilePath -PathType Leaf) 'Forced traversal apply deleted outside file.'
+    Assert-True (([System.IO.File]::ReadAllText($outsideFilePath)) -eq $outsideContent) 'Forced traversal apply modified outside file.'
+    $passed.Add('updater manifest path traversal rejection and containment')
+
+    # Manifest targeting project-owned files rejection
+    $contextAttackProject = Join-Path $testRoot 'updater-context-attack'
+    Write-FixtureFile -Path (Join-Path $contextAttackProject 'README.md') -Content "# Context Attack Project`n"
+    $null = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $contextAttackProject, '-Apply')
+    $protectedContextPath = Join-Path $contextAttackProject '.ai-dev-system/PROJECT_CONTEXT.md'
+    $protectedContextContent = "# Real project context`nDo not delete.`n"
+    Write-FixtureFile -Path $protectedContextPath -Content $protectedContextContent
+    $attackManifestPath = Join-Path $contextAttackProject '.ai-dev-system/manifest.json'
+    Write-FixtureFile -Path $attackManifestPath -Content '{"version":"1.0.0","files":{"PROJECT_CONTEXT.md":"dummyhash","VERSION":"dummy"}}'
+
+    $attackPreview = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $contextAttackProject, '-OutputFormat', 'Json')
+    Assert-True ($attackPreview.ExitCode -eq 0) 'Project-context manifest preview should succeed as a read-only query.'
+    $attackPreviewReport = $attackPreview.Output | ConvertFrom-Json
+    Assert-True ($attackPreviewReport.proposal.action -eq 'BLOCKED') 'Project-context manifest preview should propose BLOCKED.'
+    Assert-True ((@($attackPreviewReport.reasons) -match 'unsafe path entry').Count -gt 0) 'Project-context manifest preview should report unsafe path reason.'
+
+    $attackApply = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $contextAttackProject, '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($attackApply.ExitCode -eq 2) 'Project-context manifest apply without -Force must block.'
+    $attackApplyReport = $attackApply.Output | ConvertFrom-Json
+    Assert-True ($attackApplyReport.result -eq 'BLOCKED') 'Project-context manifest apply should report BLOCKED.'
+    Assert-True (([System.IO.File]::ReadAllText($protectedContextPath)) -eq $protectedContextContent) 'Blocked context attack modified PROJECT_CONTEXT.md.'
+
+    $forcedAttackApply = Invoke-Tool -ScriptPath $updaterRunner -Arguments @('-ProjectRoot', $contextAttackProject, '-Apply', '-Force', '-OutputFormat', 'Json')
+    Assert-True ($forcedAttackApply.ExitCode -eq 2) 'Project-context manifest apply with -Force must STILL block.'
+    $forcedAttackReport = $forcedAttackApply.Output | ConvertFrom-Json
+    Assert-True ($forcedAttackReport.result -eq 'BLOCKED') 'Forced project-context attack should report BLOCKED.'
+    Assert-True (Test-Path -LiteralPath $protectedContextPath -PathType Leaf) 'Forced project-context attack deleted PROJECT_CONTEXT.md.'
+    Assert-True (([System.IO.File]::ReadAllText($protectedContextPath)) -eq $protectedContextContent) 'Forced project-context attack modified PROJECT_CONTEXT.md.'
+    $passed.Add('updater manifest project-owned file protection and non-bypassability')
+
     $selfInstall = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $repositoryRoot, '-OutputFormat', 'Json')
     Assert-True ($selfInstall.ExitCode -ne 0) 'Installer should refuse self-installation into source repository.'
     $passed.Add('installer self-installation rejection')

@@ -19,6 +19,32 @@ function Get-FileHashValue {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
 
+function Test-SafeManifestPath {
+    param(
+        [string]$Path,
+        [string]$SystemDir
+    )
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $trimmed = $Path.Trim()
+    if ($trimmed -match '^[/\\]' -or $trimmed.Contains(':')) { return $false }
+    $segments = $trimmed -split '[/\\]'
+    if ($segments -contains '..' -or $segments -contains '.') { return $false }
+    if ($segments -icontains 'PROJECT_CONTEXT.md' -or $segments -icontains 'project_context.md' -or $segments -icontains 'manifest.json') {
+        return $false
+    }
+    try {
+        $resolvedSystem = [System.IO.Path]::GetFullPath($SystemDir).TrimEnd('\', '/')
+        $candidate = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($resolvedSystem, $trimmed))
+        $prefix = $resolvedSystem + [System.IO.Path]::DirectorySeparatorChar
+        if (-not $candidate.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $false
+        }
+    } catch {
+        return $false
+    }
+    return $true
+}
+
 function Write-InstallReport {
     param(
         [object]$Report,
@@ -174,6 +200,7 @@ try {
     }
 
     $filesProp = $null
+    $unsafeManifest = $false
     if ($Update -and $isInstalled) {
         if (-not (Test-Path -LiteralPath $targetManifestFile -PathType Leaf)) {
             $reasons.Add('Cannot verify update safety: manifest.json is missing. Use -Force to overwrite.')
@@ -191,34 +218,48 @@ try {
                     $reasons.Add('Cannot verify update safety: manifest.json is incomplete (missing version or file entries). Use -Force to overwrite.')
                     if (-not $Force) { $hasBlocker = $true }
                 } else {
+                    $unsafeEntries = [System.Collections.Generic.List[string]]::new()
                     foreach ($prop in $filesProp.Value.PSObject.Properties) {
                         $rel = $prop.Name
-                        $recordedHash = $prop.Value
-                        $targetPath = Join-Path $targetSystemDir $rel
-                        if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
-                            $currentHash = Get-FileHashValue -Path $targetPath
-                            if ($currentHash -ne $recordedHash) {
-                                $modifiedFiles.Add($rel)
-                            }
+                        if (-not (Test-SafeManifestPath -Path $rel -SystemDir $targetSystemDir)) {
+                            $unsafeEntries.Add($rel)
                         }
                     }
 
-                    $unrecordedCollisions = [System.Collections.Generic.List[string]]::new()
-                    foreach ($rel in $sourceFiles.Keys) {
-                        $targetPath = Join-Path $targetSystemDir $rel
-                        if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
-                            $recordedProp = $filesProp.Value.PSObject.Properties[$rel]
-                            if ($null -eq $recordedProp) {
-                                $targetHash = Get-FileHashValue -Path $targetPath
-                                if ($targetHash -ne $sourceFiles[$rel]) {
-                                    $unrecordedCollisions.Add($rel)
+                    if ($unsafeEntries.Count -gt 0) {
+                        $reasons.Add("Cannot verify update safety: manifest.json contains unsafe path entry(s): $($unsafeEntries -join ', '). Path traversal, escape outside .ai-dev-system/, and targeting project-owned files are prohibited.")
+                        $hasBlocker = $true
+                        $unsafeManifest = $true
+                    } else {
+                        foreach ($prop in $filesProp.Value.PSObject.Properties) {
+                            $rel = $prop.Name
+                            $recordedHash = $prop.Value
+                            $targetPath = Join-Path $targetSystemDir $rel
+                            if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+                                $currentHash = Get-FileHashValue -Path $targetPath
+                                if ($currentHash -ne $recordedHash) {
+                                    $modifiedFiles.Add($rel)
                                 }
                             }
                         }
-                    }
-                    if ($unrecordedCollisions.Count -gt 0) {
-                        $reasons.Add("Cannot verify update safety: destination contains unrecorded file(s) not tracked in manifest: $($unrecordedCollisions -join ', '). Use -Force to overwrite.")
-                        if (-not $Force) { $hasBlocker = $true }
+
+                        $unrecordedCollisions = [System.Collections.Generic.List[string]]::new()
+                        foreach ($rel in $sourceFiles.Keys) {
+                            $targetPath = Join-Path $targetSystemDir $rel
+                            if (Test-Path -LiteralPath $targetPath -PathType Leaf) {
+                                $recordedProp = $filesProp.Value.PSObject.Properties[$rel]
+                                if ($null -eq $recordedProp) {
+                                    $targetHash = Get-FileHashValue -Path $targetPath
+                                    if ($targetHash -ne $sourceFiles[$rel]) {
+                                        $unrecordedCollisions.Add($rel)
+                                    }
+                                }
+                            }
+                        }
+                        if ($unrecordedCollisions.Count -gt 0) {
+                            $reasons.Add("Cannot verify update safety: destination contains unrecorded file(s) not tracked in manifest: $($unrecordedCollisions -join ', '). Use -Force to overwrite.")
+                            if (-not $Force) { $hasBlocker = $true }
+                        }
                     }
                 }
             } catch {
@@ -267,10 +308,10 @@ try {
         }
     }
 
-    if ($Update -and $null -ne $filesProp -and $null -ne $filesProp.Value) {
+    if ($Update -and -not $unsafeManifest -and $null -ne $filesProp -and $null -ne $filesProp.Value) {
         foreach ($prop in $filesProp.Value.PSObject.Properties) {
             $rel = $prop.Name
-            if (-not $sourceFiles.ContainsKey($rel)) {
+            if ((Test-SafeManifestPath -Path $rel -SystemDir $targetSystemDir) -and -not $sourceFiles.ContainsKey($rel)) {
                 $removed.Add($rel)
             }
         }
@@ -395,6 +436,9 @@ $agentsBlockEnd
     }
 
     foreach ($rel in $removed) {
+        if (-not (Test-SafeManifestPath -Path $rel -SystemDir $targetSystemDir)) {
+            continue
+        }
         $dstPath = Join-Path $targetSystemDir $rel
         if (Test-Path -LiteralPath $dstPath -PathType Leaf) {
             Remove-Item -LiteralPath $dstPath -Force

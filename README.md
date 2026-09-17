@@ -2,68 +2,222 @@
 
 A reusable, context-first, specification-driven AI development system for coding agents.
 
-AI Dev System exists to make development deliberate, changes small, and completion verifiable across technology stacks and coding agents. It provides a shared foundation for reusable rules, skills, and workflows, guided by evidence from real project work.
+AI Dev System makes AI-assisted software development deliberate, changes surgical, and completion verifiable across technology stacks and coding agents. It provides a shared, technology-agnostic foundation of rules, skills, workflows, deterministic gates, and non-destructive distribution.
 
-**Status: stable release (`1.0.0`).** Milestones 1 through 4 implement the technology-agnostic operating model, deterministic gates, verification-evidence contracts, preview-first project onboarding, and distribution via preview-first installation and safe versioned updates; see the [roadmap](docs/ROADMAP.md).
+**Status: Stable Release (`1.0.0`).** Milestone 1 through Milestone 4 outcomes are complete and verified; see the [Roadmap](docs/ROADMAP.md) and [Changelog](CHANGELOG.md).
 
-## Intended lifecycle
+---
 
+## Value Proposition & Supported Use Cases
+
+Most AI coding assistants struggle with context drift, unconstrained refactoring, and unverifiable claims of completion. AI Dev System establishes a disciplined development lifecycle:
+
+- **New Projects:** Establish context, architecture boundaries, and success criteria before writing code.
+- **Active Projects:** Discover existing conventions, test suites, and instruction files without clobbering established project practices or modifying unrelated code.
+- **Legacy Projects:** Ground agent decisions in runtime and source code reality, documenting documentation drift and risk before modernizing or refactoring.
+
+---
+
+## Quick Start
+
+### Prerequisites
+- **Git**: A standard Git installation available in `PATH`.
+- **PowerShell Runtime**: Supported on Windows PowerShell 5.1 (built into Windows) or PowerShell Core 7+ (`pwsh`) on Windows, macOS, or Linux.
+
+### 1. Clone the Stable Release
+Clone the stable `v1.0.0` release tag:
+```bash
+git clone --branch v1.0.0 https://github.com/truthrive/ai-dev-system.git
+cd ai-dev-system
+```
+
+### 2. Preview Installation (Read-Only)
+Set a target project directory variable (replace `"C:\Projects\my-app"` with your actual project path) and preview planned additions and instruction integrations without writing files:
+```powershell
+$Target = "C:\Projects\my-app"
+
+# Using PowerShell Core 7 (pwsh):
+pwsh -NoProfile -File installer/install.ps1 -ProjectRoot $Target
+
+# Or using Windows PowerShell 5.1:
+powershell -ExecutionPolicy Bypass -File installer/install.ps1 -ProjectRoot $Target
+```
+
+### 3. Apply Installation & Review Git Changes
+Deploy AI Dev System into your target project:
+```powershell
+pwsh -NoProfile -File installer/install.ps1 -ProjectRoot $Target -Apply
+```
+
+> [!IMPORTANT]
+> **Commit installation changes before onboarding:** AI Dev System does not automatically commit changes in your target project. In an existing Git repository, review the added `.ai-dev-system/` files and the modified `AGENTS.md` using your standard Git workflow (`git status`, `git diff`) and commit them (`git commit`) before continuing. Onboarding in Step 4 strictly requires a clean Git work tree to establish an accurate project baseline.
+
+### 4. Onboard the Project
+Once installation changes are committed and the working tree is clean, run onboarding to discover your project's conventions and generate an initial additive project-context file:
+```powershell
+# Preview discovery:
+pwsh -NoProfile -File onboarding/onboard.ps1 -ProjectRoot $Target -ProjectType Active
+
+# Apply discovery (creates .ai-dev-system/PROJECT_CONTEXT.md):
+pwsh -NoProfile -File onboarding/onboard.ps1 -ProjectRoot $Target -ProjectType Active -Apply
+```
+Review the generated `.ai-dev-system/PROJECT_CONTEXT.md`, refine any unverified statements, and commit it using your project's normal review process.
+
+---
+
+## What the Installer Manages
+
+The installer implements non-destructive defaults and path checks:
+
+### Files Created in Target Project
+The installer deploys the self-contained system runtime into `<target>/.ai-dev-system/`:
+- **`core/`**: Ten-principle [constitution](core/constitution/default.md), rules (coding, architecture, testing, git, docs, security), lifecycle skills (context, specify, plan, tasks, implement, verify, converge), and workflows (feature, bugfix, refactor).
+- **`docs/`**: Central router ([INDEX.md](docs/INDEX.md)), verification evidence contract, and onboarding guide.
+- **`gates/`**: Deterministic read-only gate runner (`run.ps1`) and [gate contract](gates/CONTRACT.md).
+- **`onboarding/`**: Discovery engine and onboarding runner (`onboard.ps1`).
+- **`templates/`**: Reusable templates for project context and verification evidence.
+- **`installer/`**: Portable `install.ps1` and `update.ps1` scripts.
+- **`VERSION`**: Target installed version identifier.
+- **`manifest.json`**: Cryptographic SHA-256 hash manifest tracking system-managed files to detect local modifications during update.
+
+### Entrypoint Integration (`AGENTS.md`)
+- **New `AGENTS.md`**: Created if not already present in the target project root, routing agents to `.ai-dev-system/docs/INDEX.md`.
+- **Existing `AGENTS.md`**: Updated non-destructively by inserting or updating a clearly delimited block:
+  ```markdown
+  <!-- AI-DEV-SYSTEM:START -->
+  ...
+  <!-- AI-DEV-SYSTEM:END -->
+  ```
+  All existing project instructions outside the delimiters remain untouched.
+
+### Files Strictly Preserved
+- **`.ai-dev-system/PROJECT_CONTEXT.md`**: Project-owned file generated during onboarding. The installer and updater **never** overwrite, remove, or alter this file.
+
+---
+
+## Agent Compatibility & Configuration
+
+AI Dev System uses technology-agnostic Markdown rather than vendor-specific plugins or IDE extensions. Recognizing `AGENTS.md` acts only as an entrypoint router; it **does not** automatically load or inject all files under `.ai-dev-system/` into an agent's context. Agents must navigate and load linked rules, skills, and workflows on demand as their tasks require.
+
+### Supported Coding Agents
+
+| Agent | Native `AGENTS.md` Support | Alternative Configuration / Instructions | Integration Status with AI Dev System |
+| --- | --- | --- | --- |
+| **Google Antigravity** | Yes (workspace root) | Also discovers `GEMINI.md` and `.agents/rules/*.md` | **Verified**: Automatic instruction discovery and rule injection verified live; progressive disclosure via linked skills. |
+| **Gemini CLI** | Yes (workspace root) | Also discovers `GEMINI.md` | **Verified**: Instruction discovery verified in onboarding fixtures. |
+| **OpenAI Codex** | Yes (pioneered `AGENTS.md`) | Custom prompt / system instructions | **Verified**: Onboarding discovery and initial milestone development used `AGENTS.md`. |
+| **Cursor** | Yes (recent versions) | [`.cursorrules`](https://docs.cursor.com/context/rules-for-ai) or [`.cursor/rules/*.md`](https://docs.cursor.com/context/rules-for-ai) | **Configured via pointer**: Discovered by onboarding; requires manual pointer to `AGENTS.md` or `.ai-dev-system/` if not using native discovery. |
+| **GitHub Copilot** | No | [`.github/copilot-instructions.md`](https://docs.github.com/en/copilot/customizing-copilot/adding-custom-instructions-for-github-copilot) | **Configured via pointer**: Discovered by onboarding; requires adding an instruction pointer referencing `.ai-dev-system/docs/INDEX.md`. |
+| **Claude Code** | No | [`CLAUDE.md`](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code) | **Configured via pointer**: Discovered by onboarding; requires adding an instruction pointer referencing `.ai-dev-system/docs/INDEX.md`. |
+
+### Important Operational Boundaries
+- **No Automatic Bulk-Context Ingestion**: Discovering `AGENTS.md` loads only top-level router instructions. It does not preload every rule, skill, or workflow into agent context.
+- **Vendor Capabilities vs. Verified Integration**: While vendors document custom instruction capabilities, AI Dev System has only been verified against the test harness and onboarding discovery fixtures. End-to-end execution across every third-party model and IDE interface has not been independently benchmarked.
+- **Tool Requirements**: All agents require shell execution capabilities (Windows PowerShell 5.1 or PowerShell Core 7+) and Git to run gates, verification checks, and onboarding scripts.
+
+---
+
+## Installation vs. Project Onboarding
+
+AI Dev System strictly separates installing the engine from learning a project:
+- **Installation (`installer/install.ps1`)**: Deploys system files into `.ai-dev-system/` and configures `AGENTS.md`. It does not inspect project source code or infer build commands.
+- **Project Onboarding (`onboarding/onboard.ps1`)**: Inspects the target project's reality—existing instructions, package declarations, test configurations, Git status, and uncommitted changes—and generates a tailored `.ai-dev-system/PROJECT_CONTEXT.md`. Onboarding never alters project source code or existing instruction files.
+
+---
+
+## Updating an Installed Project
+
+When updating AI Dev System to a newer version:
+
+### 1. Preview Update
+Set your target project path (replacing `"C:\Projects\my-app"` with your actual project path) and inspect added, updated, removed, and preserved files:
+```powershell
+$Target = "C:\Projects\my-app"
+pwsh -NoProfile -File installer/update.ps1 -ProjectRoot $Target
+```
+
+### 2. Apply Update
+Apply updates cleanly:
+```powershell
+pwsh -NoProfile -File installer/update.ps1 -ProjectRoot $Target -Apply
+```
+
+### Safety Checks During Update
+- **Context Preservation**: `.ai-dev-system/PROJECT_CONTEXT.md` is strictly project-owned and preserved.
+- **Modification Detection**: If an installed file's hash differs from the recorded manifest hash, update halts before overwriting it (override requires `-Force`).
+- **Manifest Path Validation**: The updater validates each entry read from `manifest.json` using `Test-SafeManifestPath`. Paths that are empty, rooted, contain traversal segments (`..` or `.`), or target project-owned files (`PROJECT_CONTEXT.md`, `manifest.json`) are rejected before executing file removals or updates.
+
+---
+
+## Troubleshooting
+
+- **Target Git work tree has uncommitted changes**:
+  - *Cause*: Both the installer and onboarding require a clean Git work tree before applying changes to ensure clean rollback boundaries.
+  - *Resolution*: Review changes with `git status`, then commit (`git commit`) or stash (`git stash`) them before retrying with `-Apply`.
+- **Target already contains conflicting files**:
+  - *Cause*: Running a fresh install against a project that already has `.ai-dev-system/` files not tracked by a source manifest.
+  - *Resolution*: Run `installer/update.ps1` instead, or pass `-Force` if intentionally replacing unmanaged collisions.
+- **Locally modified system files detected**:
+  - *Cause*: One or more files inside `.ai-dev-system/` were edited manually.
+  - *Resolution*: Review differences with `git diff .ai-dev-system/`. If the changes should be overwritten by the release files, pass `-Force`.
+- **Git ownership or permission errors**:
+  - *Cause*: Running across different user accounts, network shares, or container mount boundaries where Git detects a mismatch between current user ownership and repository directory ownership.
+  - *Resolution*: Verify the repository directory's filesystem ownership and ensure the source is trusted before adding it to Git's safe directories (`git config --global --add safe.directory <verified-path>`). Do not blindly add untrusted directories.
+
+---
+
+## Intended Lifecycle
+
+```text
 Intent → Context → Specification → Plan → Tasks → Implementation → Verification → Convergence → Evidence
+```
 
 Start with the desired outcome, inspect the project, and define success criteria before planning and implementing small tasks. Verification checks those criteria; convergence resolves gaps between the implementation and specification; evidence records what was checked and the results. Project-native checks remain authoritative, supplemented by the implemented read-only gates where applicable.
 
-## Core operating model
+---
 
-Milestone 1 implements:
+## Core Operating Model
 
-- six reusable rules for coding, architecture, testing, Git, documentation, and security;
-- seven skills that separate context discovery, specification, planning, task breakdown, implementation, verification, and convergence;
-- distinct workflows for features, bugfixes, and behavior-preserving refactors.
+### Constitution & Rules
+- [Default Constitution](core/constitution/default.md): Ten core principles prioritizing surgical changes, simplicity, and evidence.
+- [Coding Rule](core/rules/coding.md)
+- [Architecture Rule](core/rules/architecture.md)
+- [Testing Rule](core/rules/testing.md)
+- [Git Rule](core/rules/git.md)
+- [Documentation Rule](core/rules/docs.md)
+- [Security Rule](core/rules/security.md)
 
-The [documentation index](docs/INDEX.md) routes agents to the implemented material. The feature workflow follows the full lifecycle. Bugfixes may use explicit expected behavior instead of manufacturing a full specification, while refactors establish a behavioral baseline before changing structure.
+### Lifecycle Skills
+- [Context](core/skills/context.md): Read-only reality discovery.
+- [Specify](core/skills/specify.md): Define WHAT and WHY.
+- [Plan](core/skills/plan.md): Define HOW.
+- [Tasks](core/skills/tasks.md): Executable task breakdown.
+- [Implement](core/skills/implement.md): Execute approved scope.
+- [Verify](core/skills/verify.md): Produce evidence against success criteria.
+- [Converge](core/skills/converge.md): Reconcile implementation against specification.
 
-## Enforcement and onboarding
+### Workflows
+- [Feature Workflow](core/workflows/feature.md): New capabilities or intentional behavior changes.
+- [Bugfix Workflow](core/workflows/bugfix.md): Defects with reproduction, diagnosis, and regression verification.
+- [Refactor Workflow](core/workflows/refactor.md): Structural improvements with baseline preservation.
 
-Milestone 2 adds:
+### Enforcement & Gates
+- [Gate Contract](gates/CONTRACT.md) & [Runner](gates/run.ps1): Deterministic read-only checks for Git whitespace errors and relative Markdown link integrity.
+- [Verification Evidence Contract](docs/verification-evidence.md): Formal pass, fail, and blocked criteria.
 
-- a [technology-agnostic gate contract](gates/CONTRACT.md) and runner for Git whitespace errors and broken relative Markdown links;
-- a [verification and evidence contract](docs/verification-evidence.md) with explicit pass, fail, and blocked semantics;
-- [preview-first onboarding](docs/onboarding.md) that discovers instructions, context, conventions, checks, documentation, and uncommitted work before creating a project-context file;
-- reusable [project-context](templates/project-context.md) and [verification-evidence](templates/verification-evidence.md) templates;
-- isolated fixture checks for non-destructive behavior and failure handling.
+---
 
-Onboarding creates no project instruction file and refuses to overwrite recognized context or operate on dirty active and legacy projects.
+## Separation of Concerns
 
-## Distribution and installation
+- **Global Reusable System:** Shared principles, rules, skills, and workflows that apply across projects and agents (this repository).
+- **Project-Specific Context:** A project's source, runtime behavior, architecture, constraints, and decisions (lives in `.ai-dev-system/PROJECT_CONTEXT.md`).
+- **Temporary Task State:** Current intent, specification, plan, task list, and ephemeral verification logs.
 
-Milestone 4 implements:
+---
 
-- a preview-first [installer](installer/install.ps1) for adopting AI Dev System in new and active projects with delimited `AGENTS.md` integration and SHA-256 manifest tracking;
-- a safe [updater](installer/update.ps1) that validates local modifications, preserves project-owned context, and cleanly updates system-managed files;
-- cross-platform PowerShell 5.1 and PowerShell Core 7 (`pwsh`) compatibility for deterministic execution on Windows and other supported platforms.
+## Links & Community
 
-Preview installation into a target project:
-
-```powershell
-pwsh -NoProfile -File installer/install.ps1 -ProjectRoot <path>
-```
-
-Pass `-Apply` to install into `.ai-dev-system/` and link the project entrypoint. Use `installer/update.ps1 -ProjectRoot <path> -Apply` to update an existing project.
-
-## Separation of concerns
-
-- **Global reusable system:** shared principles and, when justified by repeated evidence, rules, skills, and workflows that apply across projects and agents. This repository holds that foundation.
-- **Project-specific context:** a project's source, runtime behavior, architecture, constraints, and decisions. It belongs with the project and must be checked against its current implementation.
-- **Temporary task state:** the current intent, specification, plan, tasks, and verification evidence. Its storage and retention conventions are not implemented.
-
-## Intended project support
-
-- **New projects:** establish context and success criteria before introducing implementation.
-- **Active projects:** fit changes into existing conventions and preserve unrelated behavior.
-- **Legacy projects:** inspect source and runtime to establish actual behavior before relying on potentially outdated documentation.
-
-Prefer the simplest sufficient solution and surgical changes in every case. Completion requires verification evidence.
-
-## Start here
-
-Use [docs/INDEX.md](docs/INDEX.md) to find available documentation and see which areas are not implemented. Coding agents begin with [AGENTS.md](AGENTS.md).
+- **Documentation Index:** [docs/INDEX.md](docs/INDEX.md)
+- **Releases & Changelog:** [GitHub Releases](https://github.com/truthrive/ai-dev-system/releases) | [CHANGELOG.md](CHANGELOG.md)
+- **Issue Reporting:** [GitHub Issues](https://github.com/truthrive/ai-dev-system/issues)
+- **License:** [LICENSE](LICENSE)

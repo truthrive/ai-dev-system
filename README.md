@@ -4,7 +4,7 @@ A reusable, context-first, specification-driven AI development system for coding
 
 AI Dev System makes AI-assisted software development deliberate, changes surgical, and completion verifiable across technology stacks and coding agents. It provides a shared, technology-agnostic foundation of rules, skills, workflows, deterministic gates, and non-destructive distribution.
 
-**Status: Stable Release (`1.0.0`).** Milestone 1 through Milestone 4 outcomes are complete and verified; see the [Roadmap](docs/ROADMAP.md) and [Changelog](CHANGELOG.md).
+**Status: Version `1.0.1`.** Milestone 1 through Milestone 4 outcomes are complete and verified; see the [Roadmap](docs/ROADMAP.md) and [Changelog](CHANGELOG.md).
 
 ---
 
@@ -24,10 +24,10 @@ Most AI coding assistants struggle with context drift, unconstrained refactoring
 - **Git**: A standard Git installation available in `PATH`.
 - **PowerShell Runtime**: Supported on Windows PowerShell 5.1 (pre-installed on Windows) or PowerShell Core 7+ (`pwsh`) on Windows, macOS, or Linux. Note that `pwsh` is not installed by default.
 
-### 1. Clone the Stable Release
-Clone the stable `v1.0.0` release tag:
+### 1. Clone the Release
+Clone the `v1.0.1` release tag:
 ```bash
-git clone --branch v1.0.0 https://github.com/truthrive/ai-dev-system.git
+git clone --branch v1.0.1 https://github.com/truthrive/ai-dev-system.git
 cd ai-dev-system
 ```
 

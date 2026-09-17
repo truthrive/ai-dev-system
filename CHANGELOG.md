@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.1] - 2026-09-17
+
+### Added
+
+- Added official MIT License and improved public adoption documentation with copyable paths and explicit Windows PowerShell 5.1 and PowerShell Core 7+ (`pwsh`) examples across Preview, Apply, onboarding, and update workflows.
+- Added comprehensive multi-agent compatibility documentation covering Google Antigravity, Gemini CLI, OpenAI Codex, Cursor, GitHub Copilot (VS Code, Cloud Agent, Code Review, CLI, and GitHub.com Chat), and Claude Code, distinguishing vendor-documented support from AI Dev System integration test fixtures.
+- Added regression test coverage in `tests/run.ps1` for fresh project installation followed by onboarding preview, apply, and pre-existing context collision protection (expanding automated checks to 29).
+- Verified release candidate via an end-to-end remote-clone installation and onboarding smoke test in isolated temporary environments.
+
+### Fixed
+
+- Fixed onboarding context detection in `onboarding/onboard.ps1` to explicitly exclude the installed system template `.ai-dev-system/templates/project-context.md`, preventing false-positive blocking after a fresh installation while strictly preserving genuine project context protection.
+
 ## [1.0.0] - 2026-09-16
 
 ### Added

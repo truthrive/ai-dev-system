@@ -22,7 +22,7 @@ Most AI coding assistants struggle with context drift, unconstrained refactoring
 
 ### Prerequisites
 - **Git**: A standard Git installation available in `PATH`.
-- **PowerShell Runtime**: Supported on Windows PowerShell 5.1 (built into Windows) or PowerShell Core 7+ (`pwsh`) on Windows, macOS, or Linux.
+- **PowerShell Runtime**: Supported on Windows PowerShell 5.1 (pre-installed on Windows) or PowerShell Core 7+ (`pwsh`) on Windows, macOS, or Linux. Note that `pwsh` is not installed by default.
 
 ### 1. Clone the Stable Release
 Clone the stable `v1.0.0` release tag:
@@ -33,18 +33,28 @@ cd ai-dev-system
 
 ### 2. Preview Installation (Read-Only)
 Set a target project directory variable (replace `"C:\Projects\my-app"` with your actual project path) and preview planned additions and instruction integrations without writing files:
+
+Using Windows PowerShell 5.1:
 ```powershell
 $Target = "C:\Projects\my-app"
-
-# Using PowerShell Core 7 (pwsh):
-pwsh -NoProfile -File installer/install.ps1 -ProjectRoot $Target
-
-# Or using Windows PowerShell 5.1:
 powershell -ExecutionPolicy Bypass -File installer/install.ps1 -ProjectRoot $Target
+```
+
+Or using PowerShell Core 7+ (`pwsh`):
+```powershell
+$Target = "C:\Projects\my-app"
+pwsh -NoProfile -File installer/install.ps1 -ProjectRoot $Target
 ```
 
 ### 3. Apply Installation & Review Git Changes
 Deploy AI Dev System into your target project:
+
+Using Windows PowerShell 5.1:
+```powershell
+powershell -ExecutionPolicy Bypass -File installer/install.ps1 -ProjectRoot $Target -Apply
+```
+
+Or using PowerShell Core 7+ (`pwsh`):
 ```powershell
 pwsh -NoProfile -File installer/install.ps1 -ProjectRoot $Target -Apply
 ```
@@ -54,6 +64,17 @@ pwsh -NoProfile -File installer/install.ps1 -ProjectRoot $Target -Apply
 
 ### 4. Onboard the Project
 Once installation changes are committed and the working tree is clean, run onboarding to discover your project's conventions and generate an initial additive project-context file:
+
+Using Windows PowerShell 5.1:
+```powershell
+# Preview discovery:
+powershell -ExecutionPolicy Bypass -File onboarding/onboard.ps1 -ProjectRoot $Target -ProjectType Active
+
+# Apply discovery (creates .ai-dev-system/PROJECT_CONTEXT.md):
+powershell -ExecutionPolicy Bypass -File onboarding/onboard.ps1 -ProjectRoot $Target -ProjectType Active -Apply
+```
+
+Or using PowerShell Core 7+ (`pwsh`):
 ```powershell
 # Preview discovery:
 pwsh -NoProfile -File onboarding/onboard.ps1 -ProjectRoot $Target -ProjectType Active
@@ -61,6 +82,7 @@ pwsh -NoProfile -File onboarding/onboard.ps1 -ProjectRoot $Target -ProjectType A
 # Apply discovery (creates .ai-dev-system/PROJECT_CONTEXT.md):
 pwsh -NoProfile -File onboarding/onboard.ps1 -ProjectRoot $Target -ProjectType Active -Apply
 ```
+
 Review the generated `.ai-dev-system/PROJECT_CONTEXT.md`, refine any unverified statements, and commit it using your project's normal review process.
 
 ---
@@ -101,18 +123,22 @@ AI Dev System uses technology-agnostic Markdown rather than vendor-specific plug
 
 ### Supported Coding Agents
 
-| Agent | Native `AGENTS.md` Support | Alternative Configuration / Instructions | Integration Status with AI Dev System |
+| Agent / Environment | Native `AGENTS.md` Support | Alternative Configuration / Instructions | Integration Status with AI Dev System |
 | --- | --- | --- | --- |
 | **Google Antigravity** | Yes (workspace root) | Also discovers `GEMINI.md` and `.agents/rules/*.md` | **Verified**: Automatic instruction discovery and rule injection verified live; progressive disclosure via linked skills. |
 | **Gemini CLI** | Yes (workspace root) | Also discovers `GEMINI.md` | **Verified**: Instruction discovery verified in onboarding fixtures. |
 | **OpenAI Codex** | Yes (pioneered `AGENTS.md`) | Custom prompt / system instructions | **Verified**: Onboarding discovery and initial milestone development used `AGENTS.md`. |
 | **Cursor** | Yes (recent versions) | [`.cursorrules`](https://docs.cursor.com/context/rules-for-ai) or [`.cursor/rules/*.md`](https://docs.cursor.com/context/rules-for-ai) | **Configured via pointer**: Discovered by onboarding; requires manual pointer to `AGENTS.md` or `.ai-dev-system/` if not using native discovery. |
-| **GitHub Copilot** | No | [`.github/copilot-instructions.md`](https://docs.github.com/en/copilot/customizing-copilot/adding-custom-instructions-for-github-copilot) | **Configured via pointer**: Discovered by onboarding; requires adding an instruction pointer referencing `.ai-dev-system/docs/INDEX.md`. |
+| **GitHub Copilot (VS Code)** | Yes (Copilot Chat) | [`.github/copilot-instructions.md`](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) or [path-specific instructions](https://docs.github.com/en/copilot/reference/custom-instructions-support) | **Supported via discovery**: Instruction discovery verified in onboarding fixtures (`AGENTS.md` and `.github/copilot-instructions.md`). |
+| **GitHub Copilot (Cloud Agent)** | Yes ([vendor-documented](https://docs.github.com/en/copilot/reference/custom-instructions-support)) | [`.github/copilot-instructions.md`](https://docs.github.com/en/copilot/reference/custom-instructions-support), `CLAUDE.md`, or `GEMINI.md` | **Vendor-documented**: Native `AGENTS.md` support documented across GitHub.com and supported IDEs; not verified in AI Dev System integration tests. |
+| **GitHub Copilot (Code Review)** | Yes ([vendor-documented](https://docs.github.com/en/copilot/reference/custom-instructions-support)) | [`.github/copilot-instructions.md`](https://docs.github.com/en/copilot/reference/custom-instructions-support) or path-specific instructions | **Vendor-documented**: `AGENTS.md` support documented on GitHub.com and selected IDEs; not verified in AI Dev System integration tests. |
+| **GitHub Copilot (CLI)** | Yes ([vendor-documented](https://docs.github.com/en/copilot/reference/custom-instructions-support)) | [`.github/copilot-instructions.md`](https://docs.github.com/en/copilot/reference/custom-instructions-support), `~/.copilot/copilot-instructions.md`, `CLAUDE.md`, or `GEMINI.md` | **Vendor-documented**: Native `AGENTS.md` support documented by GitHub; not verified in AI Dev System integration tests. |
+| **GitHub.com (Copilot Chat)** | No (uses repo, personal, or org instructions) | [`.github/copilot-instructions.md`](https://docs.github.com/en/copilot/reference/custom-instructions-support) | **Configured via pointer**: Discovered by onboarding; requires adding an instruction pointer referencing `.ai-dev-system/docs/INDEX.md`. |
 | **Claude Code** | No | [`CLAUDE.md`](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code) | **Configured via pointer**: Discovered by onboarding; requires adding an instruction pointer referencing `.ai-dev-system/docs/INDEX.md`. |
 
 ### Important Operational Boundaries
 - **No Automatic Bulk-Context Ingestion**: Discovering `AGENTS.md` loads only top-level router instructions. It does not preload every rule, skill, or workflow into agent context.
-- **Vendor Capabilities vs. Verified Integration**: While vendors document custom instruction capabilities, AI Dev System has only been verified against the test harness and onboarding discovery fixtures. End-to-end execution across every third-party model and IDE interface has not been independently benchmarked.
+- **Vendor Capabilities vs. Verified Integration**: Vendors document custom instruction capabilities and file conventions (such as GitHub's [custom instructions support](https://docs.github.com/en/copilot/reference/custom-instructions-support)). AI Dev System automated integration tests specifically verify onboarding discovery of `AGENTS.md` and `.github/copilot-instructions.md`. Full end-to-end task execution across third-party cloud agents, review bots, or CLI environments has not been independently benchmarked.
 - **Tool Requirements**: All agents require shell execution capabilities (Windows PowerShell 5.1 or PowerShell Core 7+) and Git to run gates, verification checks, and onboarding scripts.
 
 ---
@@ -131,6 +157,14 @@ When updating AI Dev System to a newer version:
 
 ### 1. Preview Update
 Set your target project path (replacing `"C:\Projects\my-app"` with your actual project path) and inspect added, updated, removed, and preserved files:
+
+Using Windows PowerShell 5.1:
+```powershell
+$Target = "C:\Projects\my-app"
+powershell -ExecutionPolicy Bypass -File installer/update.ps1 -ProjectRoot $Target
+```
+
+Or using PowerShell Core 7+ (`pwsh`):
 ```powershell
 $Target = "C:\Projects\my-app"
 pwsh -NoProfile -File installer/update.ps1 -ProjectRoot $Target
@@ -138,6 +172,13 @@ pwsh -NoProfile -File installer/update.ps1 -ProjectRoot $Target
 
 ### 2. Apply Update
 Apply updates cleanly:
+
+Using Windows PowerShell 5.1:
+```powershell
+powershell -ExecutionPolicy Bypass -File installer/update.ps1 -ProjectRoot $Target -Apply
+```
+
+Or using PowerShell Core 7+ (`pwsh`):
 ```powershell
 pwsh -NoProfile -File installer/update.ps1 -ProjectRoot $Target -Apply
 ```

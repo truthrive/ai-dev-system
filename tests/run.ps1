@@ -567,6 +567,50 @@ try {
     Assert-True ($selfInstall.ExitCode -ne 0) 'Installer should refuse self-installation into source repository.'
     $passed.Add('installer self-installation rejection')
 
+    # Fresh install -> commit -> onboarding preview -> onboarding apply -> PROJECT_CONTEXT.md created
+    # and genuine pre-existing project context blocking
+    $installedOnboardProject = Join-Path $testRoot 'install-then-onboard'
+    Write-FixtureFile -Path (Join-Path $installedOnboardProject 'README.md') -Content "# Target App`n"
+    Write-FixtureFile -Path (Join-Path $installedOnboardProject 'package.json') -Content '{"name":"target-app","scripts":{"test":"exit 0"}}'
+    Write-FixtureFile -Path (Join-Path $installedOnboardProject 'AGENTS.md') -Content "# Custom Instructions`n- Always follow conventions.`n"
+    Initialize-FixtureRepository -Path $installedOnboardProject -Files @('README.md', 'package.json', 'AGENTS.md')
+
+    # Install into target
+    $installResult = Invoke-Tool -ScriptPath $installerRunner -Arguments @('-ProjectRoot', $installedOnboardProject, '-Apply')
+    Assert-True ($installResult.ExitCode -eq 0) 'Fresh installation should succeed.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $installedOnboardProject '.ai-dev-system/PROJECT_CONTEXT.md'))) 'Installer must not create PROJECT_CONTEXT.md.'
+
+    # Commit the installation changes so working tree is clean
+    & git -C $installedOnboardProject add .
+    & git -C $installedOnboardProject commit --quiet -m 'commit ai-dev-system installation'
+    Assert-True ($LASTEXITCODE -eq 0) 'Git commit after installation should succeed.'
+
+    # Onboarding preview: must report proposal CREATE and be read-only
+    $onboardPreview = Invoke-Tool -ScriptPath $onboardingRunner -Arguments @('-ProjectRoot', $installedOnboardProject, '-ProjectType', 'Active', '-OutputFormat', 'Json')
+    Assert-True ($onboardPreview.ExitCode -eq 0) 'Onboarding preview on freshly installed project should succeed.'
+    $onboardPreviewReport = $onboardPreview.Output | ConvertFrom-Json
+    Assert-True ($onboardPreviewReport.result -eq 'PREVIEW') 'Onboarding preview should report PREVIEW.'
+    Assert-True ($onboardPreviewReport.proposal.action -eq 'CREATE') 'Onboarding preview should propose CREATE, not BLOCKED.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $installedOnboardProject '.ai-dev-system/PROJECT_CONTEXT.md'))) 'Onboarding preview must not create PROJECT_CONTEXT.md.'
+
+    # Onboarding apply: must create PROJECT_CONTEXT.md and preserve custom instructions in AGENTS.md
+    $onboardApply = Invoke-Tool -ScriptPath $onboardingRunner -Arguments @('-ProjectRoot', $installedOnboardProject, '-ProjectType', 'Active', '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($onboardApply.ExitCode -eq 0) 'Onboarding apply on freshly installed project should succeed.'
+    $onboardApplyReport = $onboardApply.Output | ConvertFrom-Json
+    Assert-True ($onboardApplyReport.result -eq 'APPLIED') 'Onboarding apply should report APPLIED.'
+    $createdContextPath = Join-Path $installedOnboardProject '.ai-dev-system/PROJECT_CONTEXT.md'
+    Assert-True (Test-Path -LiteralPath $createdContextPath -PathType Leaf) 'Onboarding apply must create .ai-dev-system/PROJECT_CONTEXT.md.'
+    $agentsContent = [System.IO.File]::ReadAllText((Join-Path $installedOnboardProject 'AGENTS.md'))
+    Assert-True ($agentsContent.Contains('# Custom Instructions')) 'Existing custom instructions in AGENTS.md must be preserved.'
+    Assert-True ($agentsContent.Contains('<!-- AI-DEV-SYSTEM:START -->')) 'Managed delimited block in AGENTS.md must be present.'
+
+    # Genuine pre-existing project context must still block onboarding apply
+    $secondOnboardApply = Invoke-Tool -ScriptPath $onboardingRunner -Arguments @('-ProjectRoot', $installedOnboardProject, '-ProjectType', 'Active', '-Apply', '-OutputFormat', 'Json')
+    Assert-True ($secondOnboardApply.ExitCode -eq 2) 'Onboarding apply must block when PROJECT_CONTEXT.md already exists.'
+    $secondOnboardReport = $secondOnboardApply.Output | ConvertFrom-Json
+    Assert-True ($secondOnboardReport.result -eq 'BLOCKED') 'Second onboarding apply should report BLOCKED.'
+    $passed.Add('onboarding on installed project and pre-existing context blocking')
+
     foreach ($name in $passed) {
         "[PASS] $name"
     }

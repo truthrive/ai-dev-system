@@ -254,6 +254,9 @@ try {
 
     $contextFiles = @($projectFiles | Where-Object {
         $path = $relative[$_.FullName]
+        if ($path -eq '.ai-dev-system/templates/project-context.md') {
+            return $false
+        }
         $path -match '(^|/)(PROJECT_CONTEXT\.md|project-context\.md|WEBSITE_CONTEXT_PACK\.md)$' -or
         $path -eq 'docs/context.md'
     })
